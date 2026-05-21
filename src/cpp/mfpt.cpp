@@ -1,7 +1,9 @@
 #include "array2d.h"
 
 #include <vector>
+#include <array>
 #include <iostream>
+#include <iomanip>
 #include <fstream>
 #include <cmath>
 
@@ -10,7 +12,7 @@ using namespace std;
 using DArray2 = Array2D<double>;
 using DArray1 = std::vector<double>;
 
-void pr2(DArray2 &b, int l1, int m1, int l2, int m2) {
+void pr2(DArray2 &b, int l1, int m1, int l2, int m2, ofstream &out) {
     vector<double> v(8);
     vector<int> mv(8);
 
@@ -22,26 +24,48 @@ void pr2(DArray2 &b, int l1, int m1, int l2, int m2) {
             n2 = m1;
         }
         int n3 = n2 - n1 + 1;
-        for (int i = n1; i < n2; i++) {
-            mv[i + 1 - n1] = i;
+        for (int i = n1; i <= n2; i++) {
+            mv[i + 1 - n1 - 1] = i;
         }
         //write(25,902) (mv(i),i=1,n3)
         //902 format(7x,8(i3,6x))
-        for (int l0 = l2; l0 < m2; l0++) {
+        out << setw(7) << "";
+        for (int i = 0; i < n3; i++) {
+            out << setw(3) << mv[i] << setw(6) << "";
+        }
+        out << endl;
+        for (int l0 = l2; l0 <= m2; l0++) {
             int l = m2 + l2 - l0;
             int l02 = l;
-            for (int i = n1; i < n2; i++) {
-                v[i + 1 - n1] = b(i, l);
+            for (int i = n1; i <= n2; i++) {
+                v[i - n1] = b(i - 1, l - 1);
             }
+            //write(25,903) l02,(v(i),i=1,n3)
+            //903 format(i3,1x,8f9.3)
+            out << setw(3) << l02 << setw(1) << "";
+            for (int i = 0; i < n3; i++) {
+                out << setw(9) << std::fixed << setprecision(3) << v[i];
+            }
+            out << endl;
         }
-        //write(25,903) l02,(v(i),i=1,n3)
-        //903 format(i3,1x,8f9.3)
         if (n2 == m1) {
             return;
         }
         n1 = n1 + 8;
         n2 = n2 + 8;
     }
+}
+
+void output(const string &header, DArray2 &b, int l1, int m1, int l2, int m2, ofstream &out) {
+    out << "\n";
+    out << header << "\n";
+    pr2(b, l1, m1, l2, m2, out);
+}
+
+void output(const string &header, DArray2 &array, const std::array<int, 4> &range, ofstream &out) {
+    out << "\n";
+    out << header << "\n";
+    pr2(array, range[0], range[1], range[3], range[4], out);
 }
 
 int main() {
@@ -81,14 +105,18 @@ c      open(18,file='ds.txt',form='formatted')
     ofstream out_25("brbz003c.lst");
     ofstream out_16("aa11.txt");
 
-    int im = 20;
-    int km = 60;
-    double pi = 3.14159265358979;
+    const int im = 20;
+    const int km = 60;
+    const double pi = 3.14159265358979;
     double c = pi / km;
-    double hr = 0.2;
-    double hz = 0.2;
-    double rm = im * hr;
-    double zm = km * hz;
+    const double hr = 0.2;
+    const double hz = 0.2;
+    const double rm = im * hr;
+    const double zm = km * hz;
+    const double hr2 = hr * hr;
+    const double hz2 = hz * hz;
+
+    const std::array<int, 4> output_range = {1, 7, 1, 6};
 
 /*
     тестовое решение
@@ -111,14 +139,14 @@ c         s=dcos(pi*z/zm)
     double a0 = -0.1;
     double a = 1.0;
     double d = 1.0;
-    for (int k = 1; k < km + 2; k++) {
+    for (int k = 1; k <= km + 2; k++) {
         double z = hz * (k - 1.5);
         double s = a * z * z * (z - 1.5 * zm) + d;
         s = a0 * z * z * (z * z - 2.0 * zm * zm) + a * z * z * (z - 1.5 * zm) + d;
-        for (int i = 2; i < 2 * im + 2; i++) {
-            aa1(i, k) = s * (hr * (i - 1.5) * (2.0 * rm - hr * (i - 2.0)));
+        for (int i = 2; i <= 2 * im + 2; i++) {
+            aa1(i - 1, k - 1) = s * (hr * (i - 1.5) * (2.0 * rm - hr * (i - 2.0)));
         }
-        aa1(1, k) = -aa1(2, k);
+        aa1(0, k - 1) = -aa1(1, k - 1);
     }
 
 /*
@@ -137,28 +165,20 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
-    for (int k = 2; k < km + 1; k++) {
-        double s = (1.5 * aa1(3, k) - 4.5 * aa1(2, k)) / (hr * hr) +
-                   (aa1(2, k + 1) - 2.0 * aa1(2, k) + aa1(2, k - 1)) / (hz * hz);
-        jf(2, k) = -s;
+    for (int k = 2; k <= km + 1; k++) {
+        double s = (1.5 * aa1(2, k - 1) - 4.5 * aa1(1, k - 1)) / hr2 +
+                   (aa1(1, k) - 2.0 * aa1(1, k - 1) + aa1(1, k - 2)) / hz2;
+        jf(1, k - 1) = -s;
         for (int i = 3; i < 2 * im + 1; i++) {
             s = (((i - 0.5) * aa1(i + 1, k) - (i - 1.5) * aa1(i, k)) / (i - 1.0) -
-                 ((i - 1.5) * aa1(i, k) - (i - 2.5) * aa1(i - 1, k)) / (i - 2.0)) / (hr * hr) +
-                (aa1(i, k + 1) - 2.0 * aa1(i, k) + aa1(i, k - 1)) / (hz * hz);
+                 ((i - 1.5) * aa1(i, k) - (i - 2.5) * aa1(i - 1, k)) / (i - 2.0)) / hr2 +
+                (aa1(i, k + 1) - 2.0 * aa1(i, k) + aa1(i, k - 1)) / hz2;
             jf(i, k) = -s;
         }
     }
 
-
-/*
-      write(25,*)
-      write(25,*) 'aa1 aa1'
-      call pr21(aa1,1,7,1,6)
-      write(25,*)
-      write(25,*) 'jf jf'
-      call pr21(jf,1,7,1,6)
-c      call pr21(jf,1,7,1,km+1)
-*/
+    output("aa1 aa1", aa1, output_range, out_25);
+    output("jf jf", jf, output_range, out_25);
 
 /*
     вычисление разностей
@@ -185,11 +205,7 @@ c      call pr21(jf,1,7,1,km+1)
         phi1(i, km + 1) = 0.0;
     }
 
-/*
-      write(25,*)
-      write(25,*) 'gg gg'
-      call pr21(gg,1,7,1,6)
-*/
+    output("gg gg", gg, output_range, out_25);
 
 /*
     вычисление синусов
@@ -256,11 +272,7 @@ c  100         format('j,k,k1,k2-',3i4,i6,2e12.4)
         ff1(i, km + 1) = 0.0;
     }
 
-/*
-      write(25,*)
-      write(25,*) 'bb bb'
-      call pr21(bb,1,7,1,6)
-*/
+    output("bb bb", bb, 1, 7, 1, 6, out_25);
 
 /*
     прогонка по радиусу
@@ -285,13 +297,13 @@ c  100         format('j,k,k1,k2-',3i4,i6,2e12.4)
       enddo     !   j
 */
     for (int j = 2; j < km; j++) {
-        double s = 9.0 / (2.0 * hr * hr) + (4.0 / (hz * hz)) * (sin(c * (j - 1.0) / 2.0)) * (sin(c * (j - 1.0) / 2.0));
+        double s = 9.0 / (2.0 * hr * hr) + (4.0 / hz2) * (sin(c * (j - 1.0) / 2.0)) * (sin(c * (j - 1.0) / 2.0));
         al[2] = 3.0 / (2.0 * hr * hr * s);
         be[2] = bb(2, j) / s;
         for (int i = 3; i < 2 * im + 1; i++) {
             const auto dsin = sin(c * (j - 1.0) / 2.0);
             s = (2.0 * ((i - 1.5) / hr) * ((i - 1.5) / hr)) / ((i - 1.0) * (i - 2.0)) +
-                (4.0 / (hz * hz)) * dsin * dsin -
+                (4.0 / hz2) * dsin * dsin -
                 al[i - 1] * (i - 2.5) / ((i - 2.0) * hr * hr);
             al[i] = (i - 0.5) / (s * (i - 1.0) * hr * hr);
             be[i] = (be[i - 1] * (i - 2.5) / ((i - 2.0) * hr * hr) + bb(i, j)) / s;
@@ -302,14 +314,8 @@ c  100         format('j,k,k1,k2-',3i4,i6,2e12.4)
         }
     }
 
-/*
-      write(25,*)
-      write(25,*) 'ff ff'
-      call pr21(ff,1,7,1,6)
-      write(25,*)
-      write(25,*) 'ff1 ff1'
-      call pr21(ff1,1,7,1,6)
-*/
+    output("ff ff", ff, output_range, out_25);
+    output("ff1 ff1", ff1, output_range, out_25);
 
 /*
 c--------------------------proverka1 решения dd dd
@@ -366,14 +372,8 @@ c               s1=s1+ff(i,j)*dsin(c*(j-1.d0)*(k-1.d0))
         phi(i, km + 1) = 0.0;
     }
 
-/*
-      write(25,*)
-      write(25,*) 'phi phi'
-      call pr21(phi,1,7,1,6)
-      write(25,*)
-      write(25,*) 'phi1 phi1'
-      call pr21(phi1,1,7,1,6)
-*/
+    output("phi phi", phi, output_range, out_25);
+    output("phi1 phi1", phi1, output_range, out_25);
 
 /*
     proverka2 решения dd dd
@@ -385,18 +385,17 @@ c               s1=s1+ff(i,j)*dsin(c*(j-1.d0)*(k-1.d0))
      =       (phi(i,k+1)-2.d0*phi(i,k)+phi(i,k-1))/hz**2+gg(i,k)
          enddo
       enddo
-
-      write(25,*)
-      write(25,*) 'proverka2 dd dd'
-      call pr2(dd,1,7,1,6)
 */
+
     for (int i = 3; i < im + 1; i++) {
         for (int k = 2; k < km; k++) {
             dd(i, k) = (((i - 0.5) * phi(i + 1, k) - (i - 1.5) * phi(i, k)) / (i - 1.0) -
-                        ((i - 1.5) * phi(i, k) - (i - 2.5) * phi(i - 1, k)) / (i - 2.0)) / (hr * hr) +
-                       (phi(i, k + 1) - 2.0 * phi(i, k) + phi(i, k - 1)) / (hz * hz) + gg(i, k);
+                        ((i - 1.5) * phi(i, k) - (i - 2.5) * phi(i - 1, k)) / (i - 2.0)) / hr2 +
+                       (phi(i, k + 1) - 2.0 * phi(i, k) + phi(i, k - 1)) / hz2 + gg(i, k);
         }
     }
+
+    output("proverka2 dd dd", dd, output_range, out_25);
 
 /*
     решение при к=2
@@ -417,12 +416,12 @@ c               s1=s1+ff(i,j)*dsin(c*(j-1.d0)*(k-1.d0))
       enddo
 */
     al[1] = 1.0 / 3.0;
-    be[1] = (2.0 * hr * hr / 9.0) * (jf(2, 2) + phi(2,2) / (hz * hz));
+    be[1] = (2.0 * hr * hr / 9.0) * (jf(2, 2) + phi(2,2) / hz2);
 
     for (int i = 2; i < 2 * im; i++) {
         double s = 2.0 * (i - 0.5) * (i - 0.5) / (i * (i - 1.0)) - al[i - 1] * (i - 1.5) / (i - 1.0);
         al[i] = (i + 0.5) / (i * s);
-        be[i] = (be[i - 1] * (i - 1.5) / (i - 1.0) + hr * hr * (jf(i + 1, 2) + phi(i + 1, 2) / (hz * hz))) / s;
+        be[i] = (be[i - 1] * (i - 1.5) / (i - 1.0) + hr * hr * (jf(i + 1, 2) + phi(i + 1, 2) / hz2)) / s;
     }
 
     aa(2 * im + 2, 2) = 0.0;
@@ -462,20 +461,18 @@ c               s1=s1+ff(i,j)*dsin(c*(j-1.d0)*(k-1.d0))
      =        (aa(i,k+1)-2.d0*aa(i,k)+aa(i,k-1))/hz**2+jf(i,k)
          enddo
       enddo
-
-      write(25,*)
-      write(25,*) 'dd dd'
-      call pr2(dd,1,7,1,6)
 */
 
     for (int i = 3; i < im + 1; i++) {
         for (int k = 2; k < km + 1; k++) {
             dd(i, k) = (((i - 0.5) * aa(i + 1, k) - (i - 1.5) * aa(i, k)) / (i - 1.0) -
-                        ((i - 1.5) * aa(i, k) - (i - 2.5) * aa(i - 1, k)) / (i - 2.0)) / (hr * hr) +
-                       (aa(i, k + 1) - 2.0 * aa(i, k) + aa(i, k - 1)) / (hz * hz) + jf(i, k);
+                        ((i - 1.5) * aa(i, k) - (i - 2.5) * aa(i - 1, k)) / (i - 2.0)) / hr2 +
+                       (aa(i, k + 1) - 2.0 * aa(i, k) + aa(i, k - 1)) / hz2 + jf(i, k);
 
         }
     }
+
+    output("dd dd", dd, output_range, out_25);
 
 /*
     вычисление магнитных полей
