@@ -37,6 +37,7 @@
 *.pri
 
 build-*
+build/*
 
 # Program output
 *.txt

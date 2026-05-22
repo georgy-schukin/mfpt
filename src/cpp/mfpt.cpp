@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <fstream>
 #include <cmath>
+#include <string>
 
 using namespace std;
 
@@ -24,8 +25,8 @@ void pr2(DArray2 &b, int l1, int m1, int l2, int m2, ofstream &out) {
             n2 = m1;
         }
         int n3 = n2 - n1 + 1;
-        for (int i = n1; i <= n2; i++) {
-            mv[i + 1 - n1 - 1] = i;
+        for (int i = n1; i < n2; i++) {
+            mv[i + 1 - n1] = i;
         }
         //write(25,902) (mv(i),i=1,n3)
         //902 format(7x,8(i3,6x))
@@ -34,11 +35,11 @@ void pr2(DArray2 &b, int l1, int m1, int l2, int m2, ofstream &out) {
             out << setw(3) << mv[i] << setw(6) << "";
         }
         out << endl;
-        for (int l0 = l2; l0 <= m2; l0++) {
+        for (int l0 = l2; l0 < m2; l0++) {
             int l = m2 + l2 - l0;
             int l02 = l;
-            for (int i = n1; i <= n2; i++) {
-                v[i - n1] = b(i - 1, l - 1);
+            for (int i = n1; i < n2; i++) {
+                v[i - n1 + 1] = b(i, l);
             }
             //write(25,903) l02,(v(i),i=1,n3)
             //903 format(i3,1x,8f9.3)
@@ -56,19 +57,35 @@ void pr2(DArray2 &b, int l1, int m1, int l2, int m2, ofstream &out) {
     }
 }
 
-void output(const string &header, DArray2 &b, int l1, int m1, int l2, int m2, ofstream &out) {
-    out << "\n";
-    out << header << "\n";
-    pr2(b, l1, m1, l2, m2, out);
+void print(DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
+    out << setw(7) << "";
+    for (int i = i_start; i < i_end; i++) {
+        out << setw(3) << i + 1;
+        if (i < i_end - 1) {
+            out << setw(6) << "";
+        }
+    }
+    out << std::endl;
+    for (int j = j_end - 1; j >= j_start; j--) {
+        out << setw(3) << j + 1 << setw(1) << "";
+        for (int i = i_start; i < i_end; i++) {
+            out << setw(9) << std::fixed << setprecision(3) << data(i, j);
+        }
+        out << std::endl;
+    }
 }
 
-void output(const string &header, DArray2 &array, const std::array<int, 4> &range, ofstream &out) {
+void output(const string &header, DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
     out << "\n";
-    out << header << "\n";
-    pr2(array, range[0], range[1], range[3], range[4], out);
+    out << " " << header << "\n";
+    print(data, i_start, i_end, j_start, j_end, out);
 }
 
-int main() {
+void output(const string &header, DArray2 &data, const std::array<int, 4> &range, ofstream &out) {
+    output(header, data, range[0], range[1], range[2], range[3], out);
+}
+
+int main(int argc, char **argv) {
 /*
     program brbz003c
     Тестовая программа.
@@ -77,8 +94,8 @@ int main() {
     Предварительно вычисленные синусы.
 */
 
-    const size_t imp = 42;
-    const size_t kmp = 122;
+    const size_t imp = (argc > 1) ? stoi(argv[1]) : 42;
+    const size_t kmp = (argc > 2) ? stoi(argv[2]) : 122;
 
 /*
     real*8 br(imp,kmp),bf(imp,kmp),bz(imp,kmp)
@@ -102,13 +119,13 @@ c      open(17,file='conv11.dat',form='formatted')
 c      open(18,file='ds.txt',form='formatted')
 */
 
-    ofstream out_25("brbz003c.lst");
-    ofstream out_16("aa11.txt");
+    ofstream out_25("output.lst");
+    //ofstream out_16("aa11.txt");
 
     const int im = 20;
     const int km = 60;
     const double pi = 3.14159265358979;
-    double c = pi / km;
+    const double c = pi / km;
     const double hr = 0.2;
     const double hz = 0.2;
     const double rm = im * hr;
@@ -116,7 +133,7 @@ c      open(18,file='ds.txt',form='formatted')
     const double hr2 = hr * hr;
     const double hz2 = hz * hz;
 
-    const std::array<int, 4> output_range = {1, 7, 1, 6};
+    const std::array<int, 4> output_range = {0, 7, 0, 6};
 
 /*
     тестовое решение
@@ -139,14 +156,14 @@ c         s=dcos(pi*z/zm)
     double a0 = -0.1;
     double a = 1.0;
     double d = 1.0;
-    for (int k = 1; k <= km + 2; k++) {
-        double z = hz * (k - 1.5);
-        double s = a * z * z * (z - 1.5 * zm) + d;
-        s = a0 * z * z * (z * z - 2.0 * zm * zm) + a * z * z * (z - 1.5 * zm) + d;
-        for (int i = 2; i <= 2 * im + 2; i++) {
-            aa1(i - 1, k - 1) = s * (hr * (i - 1.5) * (2.0 * rm - hr * (i - 2.0)));
+    for (int k = 0; k < km + 2; k++) {
+        double z = hz * (k + 1 - 1.5);
+        //double s = a * z * z * (z - 1.5 * zm) + d;
+        double s = a0 * z * z * (z * z - 2.0 * zm * zm) + a * z * z * (z - 1.5 * zm) + d;
+        for (int i = 1; i < 2 * im + 2; i++) {
+            aa1(i, k) = s * (hr * (i + 1 - 1.5) * (2.0 * rm - hr * (i + 1 - 2.0)));
         }
-        aa1(0, k - 1) = -aa1(1, k - 1);
+        aa1(0, k) = -aa1(1, k);
     }
 
 /*
@@ -165,13 +182,13 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
-    for (int k = 2; k <= km + 1; k++) {
-        double s = (1.5 * aa1(2, k - 1) - 4.5 * aa1(1, k - 1)) / hr2 +
-                   (aa1(1, k) - 2.0 * aa1(1, k - 1) + aa1(1, k - 2)) / hz2;
-        jf(1, k - 1) = -s;
-        for (int i = 3; i < 2 * im + 1; i++) {
-            s = (((i - 0.5) * aa1(i + 1, k) - (i - 1.5) * aa1(i, k)) / (i - 1.0) -
-                 ((i - 1.5) * aa1(i, k) - (i - 2.5) * aa1(i - 1, k)) / (i - 2.0)) / hr2 +
+    for (int k = 1; k < km + 1; k++) {
+        double s = (1.5 * aa1(2, k) - 4.5 * aa1(1, k)) / hr2 +
+                   (aa1(1, k + 1) - 2.0 * aa1(1, k) + aa1(1, k - 1)) / hz2;
+        jf(1, k) = -s;
+        for (int i = 2; i < 2 * im + 1; i++) {
+            s = (((i + 1 - 0.5) * aa1(i + 1, k) - (i + 1 - 1.5) * aa1(i, k)) / (i + 1 - 1.0) -
+                 ((i + 1 - 1.5) * aa1(i, k) - (i + 1 - 2.5) * aa1(i - 1, k)) / (i + 1 - 2.0)) / hr2 +
                 (aa1(i, k + 1) - 2.0 * aa1(i, k) + aa1(i, k - 1)) / hz2;
             jf(i, k) = -s;
         }
@@ -194,15 +211,15 @@ c         s=dcos(pi*z/zm)
          phi1(i,km+1)=0.d0            !?
       enddo
 */
-    for (int i = 2; i < 2 * im + 1; i++) {
-        for (int k = 2; k < km; k++) {
+    for (int i = 1; i < 2 * im + 1; i++) {
+        for (int k = 1; k < km; k++) {
             gg(i, k) = jf(i, k + 1) - jf(i, k);
             phi1(i, k) = aa1(i, k + 1) - aa1(i, k);
         }
-        gg(i, 1) = 0.0;
-        gg(i, km + 1) = 0.0;
-        phi1(i, 1) = 0.0;
-        phi1(i, km + 1) = 0.0;
+        gg(i, 0) = 0.0;
+        gg(i, km) = 0.0;
+        phi1(i, 0) = 0.0;
+        phi1(i, km) = 0.0;
     }
 
     output("gg gg", gg, output_range, out_25);
@@ -214,7 +231,7 @@ c         s=dcos(pi*z/zm)
          ds(k)=dsin(c*k)
       enddo
 */
-    for (int k = 1; k < 2 * km; k++) {
+    for (int k = 0; k < 2 * km; k++) {
         ds[k] = sin(c * k);
     }
 
@@ -232,12 +249,6 @@ c         s=dcos(pi*z/zm)
                if(k1.gt.2*km) k1=k1-2*km
                s1=s1+gg(i,k)*ds(k1)
                s2=s2+phi1(i,k)*ds(k1)
-c               s1=s1+gg(i,k)*dsin(c*(j-1.d0)*(k-1.d0))
-c               s2=s2+phi1(i,k)*dsin(c*(j-1.d0)*(k-1.d0))
-c               k2=(j-1.d0)*(k-1.d0)
-c               s4=dsin(c*(j-1.d0)*(k-1.d0))
-c               write(18,100) j,k,k1,k2,ds(k1),s4
-c  100         format('j,k,k1,k2-',3i4,i6,2e12.4)
             enddo
             bb(i,j)=s1/km2
             ff1(i,j)=s2/km2
@@ -246,33 +257,31 @@ c  100         format('j,k,k1,k2-',3i4,i6,2e12.4)
          bb(i,km+1)=0.d0
          ff1(i,1)=0.d0
          ff1(i,km+1)=0.d0
-
-
       enddo    ! i
 */
-    auto km2 = km / 2;
-    for (int i = 2; i < 2 * im + 1; i++) {
-        for (int j = 2; j < km; j++) {
+    const double km2 = km / 2.0;
+    for (int i = 1; i < 2 * im + 1; i++) {
+        for (int j = 1; j < km; j++) {
             double s1 = 0.0, s2 = 0.0;
             int k1 = 0;
-            for (int k = 2; k < km; k++) {
-                k1 = k1 + j - 1;
-                if (k1 > 2 * km) {
+            for (int k = 1; k < km; k++) {
+                k1 = k1 + j;
+                if (k1 >= 2 * km) {
                     k1 = k1 - 2 * km;
                 }
-                s1 = s1 + gg(i, k) * ds[k1];
-                s2 = s2 + phi1(i, k) * ds[k1];
+                s1 += gg(i, k) * ds[k1];
+                s2 += phi1(i, k) * ds[k1];
             }
             bb(i, j) = s1 / km2;
             ff1(i, j) = s2 / km2;
         }
-        bb(i, 1) = 0.0;
-        bb(i, km + 1) = 0.0;
-        ff1(i, 1) = 0.0;
-        ff1(i, km + 1) = 0.0;
+        bb(i, 0) = 0.0;
+        bb(i, km) = 0.0;
+        ff1(i, 0) = 0.0;
+        ff1(i, km) = 0.0;
     }
 
-    output("bb bb", bb, 1, 7, 1, 6, out_25);
+    output("bb bb", bb, output_range, out_25);
 
 /*
     прогонка по радиусу
@@ -296,20 +305,21 @@ c  100         format('j,k,k1,k2-',3i4,i6,2e12.4)
          enddo
       enddo     !   j
 */
-    for (int j = 2; j < km; j++) {
-        double s = 9.0 / (2.0 * hr * hr) + (4.0 / hz2) * (sin(c * (j - 1.0) / 2.0)) * (sin(c * (j - 1.0) / 2.0));
-        al[2] = 3.0 / (2.0 * hr * hr * s);
-        be[2] = bb(2, j) / s;
-        for (int i = 3; i < 2 * im + 1; i++) {
-            const auto dsin = sin(c * (j - 1.0) / 2.0);
-            s = (2.0 * ((i - 1.5) / hr) * ((i - 1.5) / hr)) / ((i - 1.0) * (i - 2.0)) +
+    for (int j = 1; j < km; j++) {
+        const double ss = sin(c * (j + 1 - 1.0) / 2.0);
+        double s = 9.0 / (2.0 * hr2) + (4.0 / hz2) * ss * ss;
+        al[1] = 3.0 / (2.0 * hr2 * s);
+        be[1] = bb(1, j) / s;
+        for (int i = 2; i < 2 * im + 1; i++) {
+            const auto dsin = sin(c * (j + 1 - 1.0) / 2.0);
+            s = (2.0 * ((i + 1 - 1.5) / hr) * ((i + 1 - 1.5) / hr)) / ((i + 1 - 1.0) * (i + 1 - 2.0)) +
                 (4.0 / hz2) * dsin * dsin -
-                al[i - 1] * (i - 2.5) / ((i - 2.0) * hr * hr);
-            al[i] = (i - 0.5) / (s * (i - 1.0) * hr * hr);
-            be[i] = (be[i - 1] * (i - 2.5) / ((i - 2.0) * hr * hr) + bb(i, j)) / s;
+                al[i - 1] * (i + 1 - 2.5) / ((i + 1 - 2.0) * hr2);
+            al[i] = (i + 1 - 0.5) / (s * (i + 1 - 1.0) * hr2);
+            be[i] = (be[i - 1] * (i + 1 - 2.5) / ((i + 1 - 2.0) * hr2) + bb(i, j)) / s;
         }
-        ff(2 * im + 2, j) = 0.0;
-        for (int i = 2 * im + 1; i > 2; i--) {
+        ff(2 * im + 1, j) = 0.0;
+        for (int i = 2 * im; i >= 1; i--) {
             ff(i, j) = al[i] * ff(i + 1, j) + be[i];
         }
     }
@@ -318,27 +328,9 @@ c  100         format('j,k,k1,k2-',3i4,i6,2e12.4)
     output("ff1 ff1", ff1, output_range, out_25);
 
 /*
-c--------------------------proverka1 решения dd dd
-c      do k=2,km
-c         dd(2,k)=bb(2,k)+ff(3,k)*3.d0/(2.d0*hr**2)-
-c     =ff(2,k)*(9.d0/(2.d0*hr**2)+(dsin(c*(k-1.d0)/2.d0)*2.d0/hz)**2)
-c         do i=3,2*im+1
-c            dd(i,k)=bb(i,k)+ff(i+1,k)*(i-0.5d0)/((i-1.d0)*hr**2)+
-c     =         ff(i-1,k)*(i-2.5d0)/((i-2.d0)*hr**2)-
-c     =         ff(i,k)*((dsin(c*(k-1.d0)/2.d0)*2.d0/hz)**2+
-c     =         2.d0*(((i-1.5d0)/hr)**2)/((i-1.d0)*(i-2.d0)))
-c         enddo
-c      enddo     !   k
-c      write(25,*)
-c      write(25,*) 'proverka1 dd dd'
-c      call pr2(dd,1,7,1,6)
-*/
-
-/*
     обратное преобразование Фурье
 
       do i=2,2*im+1     !    im+1 ?
-
          do k=2,km
             s1=0.d0
             k1=0
@@ -346,30 +338,29 @@ c      call pr2(dd,1,7,1,6)
                k1=k1+k-1
                if(k1.gt.2*km) k1=k1-2*km
                s1=s1+ff(i,j)*ds(k1)
-c               s1=s1+ff(i,j)*dsin(c*(j-1.d0)*(k-1.d0))
             enddo
             phi(i,k)=s1
          enddo
          phi(i,1)=0.d0
          phi(i,km+1)=0.d0
-
       enddo     !   i
 */
-    for (int i = 2; i < 2 * im + 1; i++) {
-        for (int k = 2; k < km; k++) {
+
+    for (int i = 1; i < 2 * im + 1; i++) {
+        for (int k = 1; k < km; k++) {
             double s1 = 0.0;
             int k1 = 0;
-            for (int j = 2; j < km; j++) {
-                k1 = k1 + k - 1;
-                if (k1 > 2 * km) {
+            for (int j = 1; j < km; j++) {
+                k1 = k1 + k;
+                if (k1 >= 2 * km) {
                     k1 = k1 - 2 * km;
                 }
                 s1 = s1 + ff(i, j) * ds[k1];
             }
             phi(i, k) = s1;
         }
-        phi(i, 1) = 0.0;
-        phi(i, km + 1) = 0.0;
+        phi(i, 0) = 0.0;
+        phi(i, km) = 0.0;
     }
 
     output("phi phi", phi, output_range, out_25);
@@ -387,10 +378,10 @@ c               s1=s1+ff(i,j)*dsin(c*(j-1.d0)*(k-1.d0))
       enddo
 */
 
-    for (int i = 3; i < im + 1; i++) {
-        for (int k = 2; k < km; k++) {
-            dd(i, k) = (((i - 0.5) * phi(i + 1, k) - (i - 1.5) * phi(i, k)) / (i - 1.0) -
-                        ((i - 1.5) * phi(i, k) - (i - 2.5) * phi(i - 1, k)) / (i - 2.0)) / hr2 +
+    for (int i = 2; i < im + 1; i++) {
+        for (int k = 1; k < km; k++) {
+            dd(i, k) = (((i + 1 - 0.5) * phi(i + 1, k) - (i + 1 - 1.5) * phi(i, k)) / (i + 1 - 1.0) -
+                        ((i + 1 - 1.5) * phi(i, k) - (i + 1 - 2.5) * phi(i - 1, k)) / (i + 1 - 2.0)) / hr2 +
                        (phi(i, k + 1) - 2.0 * phi(i, k) + phi(i, k - 1)) / hz2 + gg(i, k);
         }
     }
@@ -415,18 +406,18 @@ c               s1=s1+ff(i,j)*dsin(c*(j-1.d0)*(k-1.d0))
          aa(i+1,2)=al(i)*aa(i+2,2)+be(i)
       enddo
 */
-    al[1] = 1.0 / 3.0;
-    be[1] = (2.0 * hr * hr / 9.0) * (jf(2, 2) + phi(2,2) / hz2);
+    al[0] = 1.0 / 3.0;
+    be[0] = (2.0 * hr2 / 9.0) * (jf(1, 1) + phi(1,1) / hz2);
 
-    for (int i = 2; i < 2 * im; i++) {
-        double s = 2.0 * (i - 0.5) * (i - 0.5) / (i * (i - 1.0)) - al[i - 1] * (i - 1.5) / (i - 1.0);
-        al[i] = (i + 0.5) / (i * s);
-        be[i] = (be[i - 1] * (i - 1.5) / (i - 1.0) + hr * hr * (jf(i + 1, 2) + phi(i + 1, 2) / hz2)) / s;
+    for (int i = 1; i < 2 * im; i++) {
+        double s = 2.0 * (i + 1 - 0.5) * (i + 1 - 0.5) / ((i + 1) * (i + 1 - 1.0)) - al[i - 1] * (i + 1 - 1.5) / (i + 1 - 1.0);
+        al[i] = (i + 1 + 0.5) / ((i + 1) * s);
+        be[i] = (be[i - 1] * (i + 1 - 1.5) / (i + 1 - 1.0) + hr2 * (jf(i + 1, 1) + phi(i + 1, 1) / hz2)) / s;
     }
 
-    aa(2 * im + 2, 2) = 0.0;
-    for (int i = 2 * im; i > 1; i--) {
-        aa(i + 1, 2) = al[i] * aa(i + 2, 2) + be[i];
+    aa(2 * im + 1, 1) = 0.0;
+    for (int i = 2 * im - 1; i >= 0; i--) {
+        aa(i + 1, 1) = al[i] * aa(i + 2, 1) + be[i];
     }
 
 /*
@@ -440,12 +431,14 @@ c               s1=s1+ff(i,j)*dsin(c*(j-1.d0)*(k-1.d0))
       enddo
 */
 
-    for (int i = 2; i < im + 2; i++) {
-        aa(i, 1) = aa(i, 2);
-        for (int k = 2; k < km + 1; k++) {
+    for (int i = 1; i < im + 2; i++) {
+        aa(i, 0) = aa(i, 1);
+        for (int k = 1; k < km + 1; k++) {
             aa(i, k + 1) = aa(i, k) + phi(i, k);
         }
     }
+
+    output("aa aa", aa, output_range, out_25);
 
 /*
     proverka3 решения dd dd
@@ -463,10 +456,10 @@ c               s1=s1+ff(i,j)*dsin(c*(j-1.d0)*(k-1.d0))
       enddo
 */
 
-    for (int i = 3; i < im + 1; i++) {
-        for (int k = 2; k < km + 1; k++) {
-            dd(i, k) = (((i - 0.5) * aa(i + 1, k) - (i - 1.5) * aa(i, k)) / (i - 1.0) -
-                        ((i - 1.5) * aa(i, k) - (i - 2.5) * aa(i - 1, k)) / (i - 2.0)) / hr2 +
+    for (int i = 2; i < im + 1; i++) {
+        for (int k = 1; k < km + 1; k++) {
+            dd(i, k) = (((i + 1 - 0.5) * aa(i + 1, k) - (i + 1 - 1.5) * aa(i, k)) / (i + 1 - 1.0) -
+                        ((i + 1 - 1.5) * aa(i, k) - (i + 1 - 2.5) * aa(i - 1, k)) / (i + 1 - 2.0)) / hr2 +
                        (aa(i, k + 1) - 2.0 * aa(i, k) + aa(i, k - 1)) / hz2 + jf(i, k);
 
         }
@@ -490,15 +483,15 @@ c               s1=s1+ff(i,j)*dsin(c*(j-1.d0)*(k-1.d0))
          enddo
       enddo
 */
-    for (int k = 1; k < km + 2; k++) {
-        bz(1, k) = 4.0 * aa(2, k) / hr;
-        for (int i = 2; i < im + 2; i++) {
-            bz(i, k) = ((i - 0.5) * aa(i + 1, k) - (i - 1.5) * aa(i, k)) / (hr * (i - 1.0));
+    for (int k = 0; k < km + 2; k++) {
+        bz(0, k) = 4.0 * aa(1, k) / hr;
+        for (int i = 1; i < im + 2; i++) {
+            bz(i, k) = ((i + 1 - 0.5) * aa(i + 1, k) - (i + 1 - 1.5) * aa(i, k)) / (hr * (i + 1 - 1.0));
         }
     }
 
-    for (int k = 1; k < km + 1; k++) {
-        for (int i = 1; i < im + 2; i++) {
+    for (int k = 0; k < km + 1; k++) {
+        for (int i = 0; i < im + 2; i++) {
             br(i, k) = -(aa(i, k + 1) - aa(i, k)) / hz;
         }
     }
