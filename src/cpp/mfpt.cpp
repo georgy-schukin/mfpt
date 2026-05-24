@@ -122,8 +122,9 @@ c      open(18,file='ds.txt',form='formatted')
     ofstream out_25("output.lst");
     //ofstream out_16("aa11.txt");
 
-    const int im = 20;
-    const int km = 60;
+    const int im = (argc > 3) ? stoi(argv[3]) : 20;
+    const int km = (argc > 4) ? stoi(argv[4]) : 60;
+
     const double pi = 3.14159265358979;
     const double c = pi / km;
     const double hr = 0.2;
