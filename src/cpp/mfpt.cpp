@@ -7,6 +7,7 @@
 #include <fstream>
 #include <cmath>
 #include <string>
+#include <chrono>
 
 using namespace std;
 
@@ -94,8 +95,29 @@ int main(int argc, char **argv) {
     Предварительно вычисленные синусы.
 */
 
-    const size_t imp = (argc > 1) ? stoi(argv[1]) : 42;
-    const size_t kmp = (argc > 2) ? stoi(argv[2]) : 122;
+    const size_t IMP_DEF = 42;
+    const size_t KMP_DEF = 122;
+    const int IM_DEF = 20;
+    const int KM_DEF = 60;
+    const int FOUT_DEF = 1;
+
+    if (argc > 1) {
+        const auto s = string(argv[1]);
+        if (s == "-h" || s == "--help") {
+            cout << argv[0] << " [imp=" << IMP_DEF <<"]" <<
+                " [kmp=" << KMP_DEF << "]" <<
+                " [im=" << IM_DEF << "]" <<
+                " [km=" << KM_DEF << "]" <<
+                " [file_output=" << FOUT_DEF << "]" << endl;
+            return 0;
+        }
+    }
+
+    const size_t imp = (argc > 1) ? stoi(argv[1]) : IMP_DEF;
+    const size_t kmp = (argc > 2) ? stoi(argv[2]) : KMP_DEF;
+    const int im = (argc > 3) ? stoi(argv[3]) : IM_DEF;
+    const int km = (argc > 4) ? stoi(argv[4]) : KM_DEF;
+    const bool file_output = (argc > 5) ? stoi(argv[5]) : FOUT_DEF;
 
 /*
     real*8 br(imp,kmp),bf(imp,kmp),bz(imp,kmp)
@@ -112,18 +134,10 @@ int main(int argc, char **argv) {
     DArray2 dd(imp, kmp), phi1(2 * imp, kmp), ff1(2 * imp, kmp);
     DArray1 ds(2 * kmp);
 
-/*
-      open(25,file='brbz003c.lst',form='formatted')
-      open(16,file='aa11.txt',form='formatted')
-c      open(17,file='conv11.dat',form='formatted')
-c      open(18,file='ds.txt',form='formatted')
-*/
-
-    ofstream out_25("output.lst");
-    //ofstream out_16("aa11.txt");
-
-    const int im = (argc > 3) ? stoi(argv[3]) : 20;
-    const int km = (argc > 4) ? stoi(argv[4]) : 60;
+    ofstream out_lst;
+    if (file_output) {
+        out_lst.open("output.lst");
+    }
 
     const double pi = 3.14159265358979;
     const double c = pi / km;
@@ -135,6 +149,8 @@ c      open(18,file='ds.txt',form='formatted')
     const double hz2 = hz * hz;
 
     const std::array<int, 4> output_range = {0, 7, 0, 6};
+
+    auto ts = chrono::steady_clock::now();
 
 /*
     тестовое решение
@@ -154,13 +170,15 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
+    // k, i: aa1(i, k) <- expr
     double a0 = -0.1;
     double a = 1.0;
     double d = 1.0;
     for (int k = 0; k < km + 2; k++) {
-        double z = hz * (k + 1 - 1.5);
+        const double z = hz * (k + 1 - 1.5);
+        const double z2 = z * z;
         //double s = a * z * z * (z - 1.5 * zm) + d;
-        double s = a0 * z * z * (z * z - 2.0 * zm * zm) + a * z * z * (z - 1.5 * zm) + d;
+        const double s = a0 * z2 * (z2 - 2.0 * zm * zm) + a * z2 * (z - 1.5 * zm) + d;
         for (int i = 1; i < 2 * im + 2; i++) {
             aa1(i, k) = s * (hr * (i + 1 - 1.5) * (2.0 * rm - hr * (i + 1 - 2.0)));
         }
@@ -183,6 +201,7 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
+    // k, i: jf(i, k) <- aa1(i+-1, k+-1)
     for (int k = 1; k < km + 1; k++) {
         double s = (1.5 * aa1(2, k) - 4.5 * aa1(1, k)) / hr2 +
                    (aa1(1, k + 1) - 2.0 * aa1(1, k) + aa1(1, k - 1)) / hz2;
@@ -195,8 +214,10 @@ c         s=dcos(pi*z/zm)
         }
     }
 
-    output("aa1 aa1", aa1, output_range, out_25);
-    output("jf jf", jf, output_range, out_25);
+    if (file_output) {
+        output("aa1 aa1", aa1, output_range, out_lst);
+        output("jf jf", jf, output_range, out_lst);
+    }
 
 /*
     вычисление разностей
@@ -212,6 +233,9 @@ c         s=dcos(pi*z/zm)
          phi1(i,km+1)=0.d0            !?
       enddo
 */
+
+    // i, k: gg(i, k) <- jf(i, k), jf(i, k + 1)
+    // i, k: phi(i, k) <- aa1(i, k), aa1(i, k + 1)
     for (int i = 1; i < 2 * im + 1; i++) {
         for (int k = 1; k < km; k++) {
             gg(i, k) = jf(i, k + 1) - jf(i, k);
@@ -223,7 +247,9 @@ c         s=dcos(pi*z/zm)
         phi1(i, km) = 0.0;
     }
 
-    output("gg gg", gg, output_range, out_25);
+    if (file_output) {
+        output("gg gg", gg, output_range, out_lst);
+    }
 
 /*
     вычисление синусов
@@ -260,6 +286,9 @@ c         s=dcos(pi*z/zm)
          ff1(i,km+1)=0.d0
       enddo    ! i
 */
+
+    // i, j: bb(i, j) <- k, gg(i, k)
+    // i, j: ff1(i, j) <- k, phi1(i, k)
     const double km2 = km / 2.0;
     for (int i = 1; i < 2 * im + 1; i++) {
         for (int j = 1; j < km; j++) {
@@ -282,7 +311,9 @@ c         s=dcos(pi*z/zm)
         ff1(i, km) = 0.0;
     }
 
-    output("bb bb", bb, output_range, out_25);
+    if (file_output) {
+        output("bb bb", bb, output_range, out_lst);
+    }
 
 /*
     прогонка по радиусу
@@ -306,6 +337,10 @@ c         s=dcos(pi*z/zm)
          enddo
       enddo     !   j
 */
+
+    // j, i: al(i) <- al(i - 1)
+    // j, i: be(i) <- be(i - 1)
+    // j, i: ff(i, j) <- al(i), be(i), ff(i + 1, j)
     for (int j = 1; j < km; j++) {
         const double ss = sin(c * (j + 1 - 1.0) / 2.0);
         double s = 9.0 / (2.0 * hr2) + (4.0 / hz2) * ss * ss;
@@ -325,8 +360,10 @@ c         s=dcos(pi*z/zm)
         }
     }
 
-    output("ff ff", ff, output_range, out_25);
-    output("ff1 ff1", ff1, output_range, out_25);
+    if (file_output) {
+        output("ff ff", ff, output_range, out_lst);
+        output("ff1 ff1", ff1, output_range, out_lst);
+    }
 
 /*
     обратное преобразование Фурье
@@ -347,6 +384,7 @@ c         s=dcos(pi*z/zm)
       enddo     !   i
 */
 
+    // i, k: phi(i, k) <- j, ff(i, j)
     for (int i = 1; i < 2 * im + 1; i++) {
         for (int k = 1; k < km; k++) {
             double s1 = 0.0;
@@ -364,8 +402,10 @@ c         s=dcos(pi*z/zm)
         phi(i, km) = 0.0;
     }
 
-    output("phi phi", phi, output_range, out_25);
-    output("phi1 phi1", phi1, output_range, out_25);
+    if (file_output) {
+        output("phi phi", phi, output_range, out_lst);
+        output("phi1 phi1", phi1, output_range, out_lst);
+    }
 
 /*
     proverka2 решения dd dd
@@ -379,6 +419,7 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
+    // i, k: dd(i, k) <- phi(i+-1, k+-1)
     for (int i = 2; i < im + 1; i++) {
         for (int k = 1; k < km; k++) {
             dd(i, k) = (((i + 1 - 0.5) * phi(i + 1, k) - (i + 1 - 1.5) * phi(i, k)) / (i + 1 - 1.0) -
@@ -387,7 +428,9 @@ c         s=dcos(pi*z/zm)
         }
     }
 
-    output("proverka2 dd dd", dd, output_range, out_25);
+    if (file_output) {
+        output("proverka2 dd dd", dd, output_range, out_lst);
+    }
 
 /*
     решение при к=2
@@ -407,6 +450,10 @@ c         s=dcos(pi*z/zm)
          aa(i+1,2)=al(i)*aa(i+2,2)+be(i)
       enddo
 */
+
+    // i: al(i) <- al(i - 1)
+    // i: be(i) <- be(i - 1), phi(i + 1, 1), jf(i + 1, 1)
+    // i: aa(i + 1, 1) <- al(i), be(i), aa(i + 2, 1)
     al[0] = 1.0 / 3.0;
     be[0] = (2.0 * hr2 / 9.0) * (jf(1, 1) + phi(1,1) / hz2);
 
@@ -432,6 +479,7 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
+    // i, k: aa(i, k + 1) <- aa(i, k), phi(i, k)
     for (int i = 1; i < im + 2; i++) {
         aa(i, 0) = aa(i, 1);
         for (int k = 1; k < km + 1; k++) {
@@ -439,7 +487,9 @@ c         s=dcos(pi*z/zm)
         }
     }
 
-    output("aa aa", aa, output_range, out_25);
+    if (file_output) {
+        output("aa aa", aa, output_range, out_lst);
+    }
 
 /*
     proverka3 решения dd dd
@@ -457,6 +507,7 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
+    // i, k: dd(i, k) <- aa(i+-1, k+-1), jf(i, k)
     for (int i = 2; i < im + 1; i++) {
         for (int k = 1; k < km + 1; k++) {
             dd(i, k) = (((i + 1 - 0.5) * aa(i + 1, k) - (i + 1 - 1.5) * aa(i, k)) / (i + 1 - 1.0) -
@@ -466,7 +517,9 @@ c         s=dcos(pi*z/zm)
         }
     }
 
-    output("dd dd", dd, output_range, out_25);
+    if (file_output) {
+        output("dd dd", dd, output_range, out_lst);
+    }
 
 /*
     вычисление магнитных полей
@@ -484,6 +537,8 @@ c         s=dcos(pi*z/zm)
          enddo
       enddo
 */
+
+    // k, i: bz(i, k) <- aa(i, k), aa(i + 1, k)
     for (int k = 0; k < km + 2; k++) {
         bz(0, k) = 4.0 * aa(1, k) / hr;
         for (int i = 1; i < im + 2; i++) {
@@ -491,11 +546,20 @@ c         s=dcos(pi*z/zm)
         }
     }
 
+    // k, i: br(i, k) <- aa(i, k), aa(i, k + 1)
     for (int k = 0; k < km + 1; k++) {
         for (int i = 0; i < im + 2; i++) {
             br(i, k) = -(aa(i, k + 1) - aa(i, k)) / hz;
         }
     }
+
+    if (file_output) {
+        out_lst.close();
+    }
+
+    auto te = chrono::steady_clock::now();
+    auto time = chrono::duration<double>(te - ts).count();
+    cout << "Time: " << time << endl;
 
     return 0;
 }
