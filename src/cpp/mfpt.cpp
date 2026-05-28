@@ -95,8 +95,6 @@ int main(int argc, char **argv) {
     Предварительно вычисленные синусы.
 */
 
-    const size_t IMP_DEF = 42;
-    const size_t KMP_DEF = 122;
     const int IM_DEF = 20;
     const int KM_DEF = 60;
     const int FOUT_DEF = 1;
@@ -104,8 +102,7 @@ int main(int argc, char **argv) {
     if (argc > 1) {
         const auto s = string(argv[1]);
         if (s == "-h" || s == "--help") {
-            cout << argv[0] << " [imp=" << IMP_DEF <<"]" <<
-                " [kmp=" << KMP_DEF << "]" <<
+            cout << argv[0] <<
                 " [im=" << IM_DEF << "]" <<
                 " [km=" << KM_DEF << "]" <<
                 " [file_output=" << FOUT_DEF << "]" << endl;
@@ -113,11 +110,9 @@ int main(int argc, char **argv) {
         }
     }
 
-    const size_t imp = (argc > 1) ? stoi(argv[1]) : IMP_DEF;
-    const size_t kmp = (argc > 2) ? stoi(argv[2]) : KMP_DEF;
-    const int im = (argc > 3) ? stoi(argv[3]) : IM_DEF;
-    const int km = (argc > 4) ? stoi(argv[4]) : KM_DEF;
-    const bool file_output = (argc > 5) ? stoi(argv[5]) : FOUT_DEF;
+    const int im = (argc > 1) ? stoi(argv[1]) : IM_DEF;
+    const int km = (argc > 2) ? stoi(argv[2]) : KM_DEF;
+    const bool file_output = (argc > 3) ? stoi(argv[3]) : FOUT_DEF;
 
 /*
     real*8 br(imp,kmp),bf(imp,kmp),bz(imp,kmp)
@@ -127,12 +122,29 @@ int main(int argc, char **argv) {
     real*8 dd(imp,kmp),phi1(2*imp,kmp),ff1(2*imp,kmp),ds(2*kmp)
 */
 
-    DArray2 br(imp, kmp), bf(imp, kmp), bz(imp, kmp);
-    DArray1 sb(2 * imp), jb(2 * imp), al(2 * imp), be(2 * imp);
-    DArray2 aa(2 * imp, kmp), jf(2 * imp, kmp), aa1(2 * imp, kmp);
-    DArray2 gg(2 * imp, kmp), bb(2 * imp, kmp), ff(2 * imp, kmp), phi(2 * imp, kmp);
-    DArray2 dd(imp, kmp), phi1(2 * imp, kmp), ff1(2 * imp, kmp);
-    DArray1 ds(2 * kmp);
+    // aa1(2 * im + 2, km + 2)
+    // jf(2 * im + 2, km + 2)
+    // gg(2 * im + 2, km + 1), phi1(2 * im + 2, km + 1)
+    // ds(2 * km)
+    // bb(2 * im + 1, km + 1), ff1(2 * im + 1, km + 1)
+    // al(2 * im + 1), be(2 * im + 1)
+    // ff(2 * im + 2, km)
+    // phi(2 * im + 1, km + 1)
+    // dd(im + 1, km + 1)
+    // aa(2 * im + 2, km + 2)
+    // bz(im + 2, km + 2)
+    // br(im + 2, km + 1)
+
+    const size_t ims = im + 2;
+    const size_t ims2 = 2 * im + 2;
+    const size_t kms = km + 2;
+
+    DArray2 br(ims, kms), bf(ims, kms), bz(ims, kms);
+    DArray1 sb(ims2), jb(ims2), al(ims2), be(ims2);
+    DArray2 aa(ims2, kms), jf(ims2, kms), aa1(ims2, kms);
+    DArray2 gg(ims2, kms), bb(ims2, kms), ff(ims2, kms), phi(ims2, kms);
+    DArray2 dd(ims, kms), phi1(ims2, kms), ff1(ims2, kms);
+    DArray1 ds(2 * kms);
 
     ofstream out_lst;
     if (file_output) {
