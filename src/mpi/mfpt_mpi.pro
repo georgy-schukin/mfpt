@@ -14,5 +14,5 @@ SOURCES +=   \
     mfpt_mpi.cpp
 
 HEADERS +=   \
-    array2d.h \
-    block_decomp.h
+    block_decomp.h \
+    shadowed_array2d.h

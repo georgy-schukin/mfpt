@@ -1,4 +1,4 @@
-#include "array2d.h"
+#include "shadowed_array2d.h"
 #include "block_decomp.h"
 
 #include <mpi.h>
@@ -14,7 +14,7 @@
 
 using namespace std;
 
-using DArray2 = Array2D<double>;
+using DArray2 = ShadowedArray2D<double>;
 using DArray1 = std::vector<double>;
 
 void print(DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
@@ -107,10 +107,11 @@ int main(int argc, char **argv) {
     // 1d decomposition by k.
     BlockDecomposition kms_decomp(kms, size);
     const size_t km_bsize = kms_decomp.getBlockSize(rank);
+    const auto my_km_range = kms_decomp.getRange(rank);
 
     DArray2 br(ims, km_bsize), bf(ims, km_bsize), bz(ims, km_bsize);
     DArray1 sb(ims2), jb(ims2), al(ims2), be(ims2);
-    DArray2 aa(ims2, km_bsize), jf(ims2, km_bsize), aa1(ims2, km_bsize);
+    DArray2 aa(ims2, km_bsize, 0, 1), jf(ims2, km_bsize, 0, 1), aa1(ims2, km_bsize, 0, 1);
     DArray2 gg(ims2, km_bsize), bb(ims2, km_bsize), ff(ims2, km_bsize), phi(ims2, km_bsize);
     DArray2 dd(ims, km_bsize), phi1(ims2, km_bsize), ff1(ims2, km_bsize);
     DArray1 ds(2 * kms);
@@ -155,8 +156,8 @@ c         s=dcos(pi*z/zm)
     double a0 = -0.1;
     double a = 1.0;
     double d = 1.0;
-    for (int k = kms_decomp.localStart(0, rank); k < kms_decomp.localEnd(km + 2, rank); k++) {
-        const int kk = kms_decomp.toGlobal(k, rank);
+    for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 2); k++) {
+        const int kk = my_km_range.toGlobal(k);
         const double z = hz * (kk + 1 - 1.5);
         const double z2 = z * z;
         const double s = a0 * z2 * (z2 - 2.0 * zm * zm) + a * z2 * (z - 1.5 * zm) + d;
@@ -183,7 +184,7 @@ c         s=dcos(pi*z/zm)
 */
 
     // k, i: jf(i, k) <- aa1(i+-1, k+-1)
-    for (int k = 1; k < km + 1; k++) {
+    for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
         double s = (1.5 * aa1(2, k) - 4.5 * aa1(1, k)) / hr2 +
                    (aa1(1, k + 1) - 2.0 * aa1(1, k) + aa1(1, k - 1)) / hz2;
         jf(1, k) = -s;

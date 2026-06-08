@@ -5,16 +5,18 @@
 #include <cstddef>
 
 template <typename T>
-class Array2D {
+class ShadowedArray2D {
 public:
-    Array2D() {}
-    Array2D(size_t sx, size_t sy) :
+    ShadowedArray2D() {}
+    ShadowedArray2D(size_t sx, size_t sy, size_t shadow_sx = 0, size_t shadow_sy = 0) :
         _size {sx, sy},
-        _data(sx * sy) {
+        _shadow_size {shadow_sx, shadow_sy},
+        _data((sx + 2 * shadow_sx) * (sy + 2 * shadow_sy)) {
     }
-    Array2D(const std::array<size_t, 2> &sz) :
+    ShadowedArray2D(const std::array<size_t, 2> &sz, const std::array<size_t, 2> &shadow_sz = {0, 0}) :
         _size(sz),
-        _data(sz[0] * sz[1]) {
+        _shadow_size(shadow_sz),
+        _data((sz[0] + 2 * shadow_sz[0]) * (sz[1] + 2 * shadow_sz[1])) {
     }
 
     void populate(const T* raw_data, size_t data_sz) {
@@ -35,13 +37,26 @@ public:
         return _size[dim];
     }
 
-    size_t fullSize() const {
-        return _data.size();
+    size_t shadowSize(size_t dim) const {
+        return _shadow_size[dim];
+    }
+
+    size_t fullSize(size_t dim) const {
+        return _size[dim] + 2 * _shadow_size[dim];
+    }
+
+    size_t size() const {
+        return _size[0] * _size[1];
     }
 
     template <typename Index>
     size_t at(Index x, Index y) const {
-        return x * _size[1] + y;
+        return (x + _shadow_size[0]) * fullSize(1) + y + _shadow_size[1];
+    }
+
+    template <typename Index>
+    size_t atRaw(Index x, Index y) const {
+        return x * fullSize(1) + y;
     }
 
     T& operator[](size_t index) {
@@ -62,6 +77,16 @@ public:
         return _data[at(x, y)];
     }
 
+    template <typename Index>
+    T& raw(Index x, Index y) {
+        return _data[atRaw(x, y)];
+    }
+
+    template <typename Index>
+    const T& raw(Index x, Index y) const {
+        return _data[atRaw(x, y)];
+    }
+
     typename std::vector<T>::iterator begin() {
         return _data.begin();
     }
@@ -72,5 +97,6 @@ public:
 
 private:
     std::array<size_t, 2> _size;
+    std::array<size_t, 2> _shadow_size;
     typename std::vector<T> _data;
 };
