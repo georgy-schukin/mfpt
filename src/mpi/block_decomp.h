@@ -13,6 +13,8 @@ public:
         int localStart(int g_index) const;
         int localEnd(int g_index) const;
         int toGlobal(int l_index) const;
+        int toLocal(int g_index) const;
+        bool hasIndex(int g_index) const;
 
     public:
         int start;

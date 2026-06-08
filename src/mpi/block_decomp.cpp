@@ -24,6 +24,14 @@ int BlockDecomposition::Range::toGlobal(int l_index) const {
     return l_index + start;
 }
 
+int BlockDecomposition::Range::toLocal(int g_index) const {
+    return g_index - start;
+}
+
+bool BlockDecomposition::Range::hasIndex(int g_index) const {
+    return (g_index >= start && g_index < end);
+}
+
 BlockDecomposition::BlockDecomposition(int size, int num_of_parts) {
     const int block_size = size / num_of_parts;
     for (int i = 0; i < num_of_parts; i++) {

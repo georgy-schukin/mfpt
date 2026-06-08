@@ -45,6 +45,10 @@ void output(const string &header, DArray2 &data, const std::array<int, 4> &range
     output(header, data, range[0], range[1], range[2], range[3], out);
 }
 
+void syncShadows(DArray2 &arr, int depth, int rank, int size) {
+    // to impl
+}
+
 int main(int argc, char **argv) {
 /*
     program brbz003c
@@ -153,16 +157,16 @@ c         s=dcos(pi*z/zm)
 */
 
     // k, i: aa1(i, k) <- expr
-    double a0 = -0.1;
-    double a = 1.0;
-    double d = 1.0;
+    const double a0 = -0.1;
+    const double a = 1.0;
+    const double d = 1.0;
     for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 2); k++) {
-        const int kk = my_km_range.toGlobal(k);
-        const double z = hz * (kk + 1 - 1.5);
+        const auto kk = my_km_range.toGlobal(k);
+        const double z = hz * (kk - 0.5);
         const double z2 = z * z;
         const double s = a0 * z2 * (z2 - 2.0 * zm * zm) + a * z2 * (z - 1.5 * zm) + d;
         for (int i = 1; i < 2 * im + 2; i++) {
-            aa1(i, k) = s * (hr * (i + 1 - 1.5) * (2.0 * rm - hr * (i + 1 - 2.0)));
+            aa1(i, k) = s * (hr * (i - 0.5) * (2.0 * rm - hr * (i - 1.0)));
         }
         aa1(0, k) = -aa1(1, k);
     }
@@ -183,16 +187,24 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
+    auto compSolution = [hr2, hz2](const DArray2 &phi, int i, int k) {
+        return (((i + 0.5) * phi(i + 1, k) - (i - 0.5) * phi(i, k)) / (i) -
+                ((i - 0.5) * phi(i, k) - (i - 1.5) * phi(i - 1, k)) / (i - 1.0)) / hr2 +
+               (phi(i, k + 1) - 2.0 * phi(i, k) + phi(i, k - 1)) / hz2;
+    };
+
+    auto compCheck = [&compSolution](const DArray2 &phi, const DArray2 &gg, int i, int k) {
+        return compSolution(phi, i, k) + gg(i, k);
+    };
+
     // k, i: jf(i, k) <- aa1(i+-1, k+-1)
+    syncShadows(aa1, 1, rank, size);
     for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
-        double s = (1.5 * aa1(2, k) - 4.5 * aa1(1, k)) / hr2 +
+        const double s = (1.5 * aa1(2, k) - 4.5 * aa1(1, k)) / hr2 +
                    (aa1(1, k + 1) - 2.0 * aa1(1, k) + aa1(1, k - 1)) / hz2;
         jf(1, k) = -s;
         for (int i = 2; i < 2 * im + 1; i++) {
-            s = (((i + 1 - 0.5) * aa1(i + 1, k) - (i + 1 - 1.5) * aa1(i, k)) / (i + 1 - 1.0) -
-                 ((i + 1 - 1.5) * aa1(i, k) - (i + 1 - 2.5) * aa1(i - 1, k)) / (i + 1 - 2.0)) / hr2 +
-                (aa1(i, k + 1) - 2.0 * aa1(i, k) + aa1(i, k - 1)) / hz2;
-            jf(i, k) = -s;
+            jf(i, k) = -compSolution(aa1, i, k);
         }
     }
 
@@ -216,17 +228,24 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
+    auto setOnK = [&my_km_range](DArray2 &arr, int i, int k, double value) {
+        if (my_km_range.hasIndex(k)) {
+            arr(i, my_km_range.toLocal(k)) = value;
+        }
+    };
+
     // i, k: gg(i, k) <- jf(i, k), jf(i, k + 1)
     // i, k: phi(i, k) <- aa1(i, k), aa1(i, k + 1)
+    syncShadows(jf, 1, rank, size);
     for (int i = 1; i < 2 * im + 1; i++) {
-        for (int k = 1; k < km; k++) {
+        for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
             gg(i, k) = jf(i, k + 1) - jf(i, k);
             phi1(i, k) = aa1(i, k + 1) - aa1(i, k);
         }
-        gg(i, 0) = 0.0;
-        gg(i, km) = 0.0;
-        phi1(i, 0) = 0.0;
-        phi1(i, km) = 0.0;
+        setOnK(gg, i, 0, 0.0);
+        setOnK(gg, i, km, 0.0);
+        setOnK(phi1, i, 0, 0.0);
+        setOnK(phi1, i, km, 0.0);
     }
 
     if (file_output) {
@@ -287,10 +306,10 @@ c         s=dcos(pi*z/zm)
             bb(i, j) = s1 / km2;
             ff1(i, j) = s2 / km2;
         }
-        bb(i, 0) = 0.0;
-        bb(i, km) = 0.0;
-        ff1(i, 0) = 0.0;
-        ff1(i, km) = 0.0;
+        setOnK(bb, i, 0, 0.0);
+        setOnK(bb, i, km, 0.0);
+        setOnK(ff1, i, 0, 0.0);
+        setOnK(ff1, i, km, 0.0);
     }
 
     if (file_output) {
@@ -323,18 +342,18 @@ c         s=dcos(pi*z/zm)
     // j, i: al(i) <- al(i - 1)
     // j, i: be(i) <- be(i - 1)
     // j, i: ff(i, j) <- al(i), be(i), ff(i + 1, j)
-    for (int j = 1; j < km; j++) {
-        const double ss = sin(c * (j + 1 - 1.0) / 2.0);
-        double s = 9.0 / (2.0 * hr2) + (4.0 / hz2) * ss * ss;
+    for (int j = my_km_range.localEnd(1); j < my_km_range.localEnd(km); j++) {
+        const auto jj = my_km_range.toGlobal(j);
+        const double dsin = sin(c * (jj) / 2.0);
+        double s = 9.0 / (2.0 * hr2) + (4.0 / hz2) * dsin * dsin;
         al[1] = 3.0 / (2.0 * hr2 * s);
         be[1] = bb(1, j) / s;
         for (int i = 2; i < 2 * im + 1; i++) {
-            const auto dsin = sin(c * (j + 1 - 1.0) / 2.0);
-            s = (2.0 * ((i + 1 - 1.5) / hr) * ((i + 1 - 1.5) / hr)) / ((i + 1 - 1.0) * (i + 1 - 2.0)) +
+            s = (2.0 * ((i - 0.5) / hr) * ((i - 0.5) / hr)) / ((i) * (i - 1.0)) +
                 (4.0 / hz2) * dsin * dsin -
-                al[i - 1] * (i + 1 - 2.5) / ((i + 1 - 2.0) * hr2);
-            al[i] = (i + 1 - 0.5) / (s * (i + 1 - 1.0) * hr2);
-            be[i] = (be[i - 1] * (i + 1 - 2.5) / ((i + 1 - 2.0) * hr2) + bb(i, j)) / s;
+                al[i - 1] * (i - 1.5) / ((i - 1.0) * hr2);
+            al[i] = (i + 0.5) / (s * (i) * hr2);
+            be[i] = (be[i - 1] * (i - 1.5) / ((i - 1.0) * hr2) + bb(i, j)) / s;
         }
         ff(2 * im + 1, j) = 0.0;
         for (int i = 2 * im; i >= 1; i--) {
@@ -380,8 +399,8 @@ c         s=dcos(pi*z/zm)
             }
             phi(i, k) = s1;
         }
-        phi(i, 0) = 0.0;
-        phi(i, km) = 0.0;
+        setOnK(phi, i, 0, 0.0);
+        setOnK(phi, i, km, 0.0);
     }
 
     if (file_output) {
@@ -402,11 +421,10 @@ c         s=dcos(pi*z/zm)
 */
 
     // i, k: dd(i, k) <- phi(i+-1, k+-1)
+    syncShadows(phi, 1, rank, size);
     for (int i = 2; i < im + 1; i++) {
-        for (int k = 1; k < km; k++) {
-            dd(i, k) = (((i + 1 - 0.5) * phi(i + 1, k) - (i + 1 - 1.5) * phi(i, k)) / (i + 1 - 1.0) -
-                        ((i + 1 - 1.5) * phi(i, k) - (i + 1 - 2.5) * phi(i - 1, k)) / (i + 1 - 2.0)) / hr2 +
-                       (phi(i, k + 1) - 2.0 * phi(i, k) + phi(i, k - 1)) / hz2 + gg(i, k);
+        for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
+            dd(i, k) = compCheck(phi, gg, i, k);
         }
     }
 
@@ -440,9 +458,9 @@ c         s=dcos(pi*z/zm)
     be[0] = (2.0 * hr2 / 9.0) * (jf(1, 1) + phi(1,1) / hz2);
 
     for (int i = 1; i < 2 * im; i++) {
-        double s = 2.0 * (i + 1 - 0.5) * (i + 1 - 0.5) / ((i + 1) * (i + 1 - 1.0)) - al[i - 1] * (i + 1 - 1.5) / (i + 1 - 1.0);
-        al[i] = (i + 1 + 0.5) / ((i + 1) * s);
-        be[i] = (be[i - 1] * (i + 1 - 1.5) / (i + 1 - 1.0) + hr2 * (jf(i + 1, 1) + phi(i + 1, 1) / hz2)) / s;
+        double s = 2.0 * (i + 0.5) * (i + 0.5) / ((i + 1) * (i)) - al[i - 1] * (i - 0.5) / (i);
+        al[i] = (i + 1.5) / ((i + 1) * s);
+        be[i] = (be[i - 1] * (i - 0.5) / (i) + hr2 * (jf(i + 1, 1) + phi(i + 1, 1) / hz2)) / s;
     }
 
     aa(2 * im + 1, 1) = 0.0;
@@ -490,12 +508,10 @@ c         s=dcos(pi*z/zm)
 */
 
     // i, k: dd(i, k) <- aa(i+-1, k+-1), jf(i, k)
+    syncShadows(aa, 1, rank, size);
     for (int i = 2; i < im + 1; i++) {
-        for (int k = 1; k < km + 1; k++) {
-            dd(i, k) = (((i + 1 - 0.5) * aa(i + 1, k) - (i + 1 - 1.5) * aa(i, k)) / (i + 1 - 1.0) -
-                        ((i + 1 - 1.5) * aa(i, k) - (i + 1 - 2.5) * aa(i - 1, k)) / (i + 1 - 2.0)) / hr2 +
-                       (aa(i, k + 1) - 2.0 * aa(i, k) + aa(i, k - 1)) / hz2 + jf(i, k);
-
+        for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
+            dd(i, k) = compCheck(aa, jf, i, k);
         }
     }
 
@@ -521,15 +537,15 @@ c         s=dcos(pi*z/zm)
 */
 
     // k, i: bz(i, k) <- aa(i, k), aa(i + 1, k)
-    for (int k = 0; k < km + 2; k++) {
+    for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 2); k++) {
         bz(0, k) = 4.0 * aa(1, k) / hr;
         for (int i = 1; i < im + 2; i++) {
-            bz(i, k) = ((i + 1 - 0.5) * aa(i + 1, k) - (i + 1 - 1.5) * aa(i, k)) / (hr * (i + 1 - 1.0));
+            bz(i, k) = ((i + 0.5) * aa(i + 1, k) - (i - 0.5) * aa(i, k)) / (hr * (i));
         }
     }
 
     // k, i: br(i, k) <- aa(i, k), aa(i, k + 1)
-    for (int k = 0; k < km + 1; k++) {
+    for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 1); k++) {
         for (int i = 0; i < im + 2; i++) {
             br(i, k) = -(aa(i, k + 1) - aa(i, k)) / hz;
         }
