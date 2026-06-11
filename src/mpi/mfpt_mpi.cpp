@@ -17,6 +17,9 @@ using namespace std;
 using DArray2 = ShadowedArray2D<double>;
 using DArray1 = std::vector<double>;
 
+const int TAG_PREV = 0;
+const int TAG_NEXT = 1;
+
 void print(DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
     out << setw(7) << "";
     for (int i = i_start; i < i_end; i++) {
@@ -45,8 +48,43 @@ void output(const string &header, DArray2 &data, const std::array<int, 4> &range
     output(header, data, range[0], range[1], range[2], range[3], out);
 }
 
-void syncShadows(DArray2 &arr, int depth, int rank, int size) {
-    // to impl
+void syncKPrev(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
+    if (rank > 0) {
+        MPI_Request req[2];
+        // Send data column.
+        MPI_Isend(&arr(0, 0), 1, col_type, rank - 1, TAG_PREV, MPI_COMM_WORLD, &req[0]);
+        // Receive in shadow.
+        MPI_Irecv(&arr.raw(arr.shadowSize(0), size_t(0)), 1, col_type, rank - 1, TAG_PREV, MPI_COMM_WORLD, &req[1]);
+        MPI_Waitall(2, req, MPI_STATUSES_IGNORE);
+    }
+}
+
+void syncKNext(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
+    if (rank < size) {
+        MPI_Request req[2];
+        // Send data column.
+        MPI_Isend(&arr(size_t(0), arr.size(1) - 1), 1, col_type, rank + 1, TAG_NEXT, MPI_COMM_WORLD, &req[0]);
+        // Receive in shadow.
+        MPI_Irecv(&arr.raw(arr.shadowSize(0), arr.fullSize(1) - 1), 1, col_type, rank + 1, TAG_NEXT, MPI_COMM_WORLD, &req[1]);
+        MPI_Waitall(2, req, MPI_STATUSES_IGNORE);
+    }
+}
+
+void syncK(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
+    syncKPrev(arr, col_type, rank, size);
+    syncKNext(arr, col_type, rank, size);
+}
+
+MPI_Datatype makeColType(const DArray2 &array) {
+    MPI_Datatype col_type;
+    if (array.isRowMajorOrder()) {
+        MPI_Datatype temp_type;
+        MPI_Type_vector(array.size(0), 1, array.fullSize(1), MPI_DOUBLE, &temp_type);
+        MPI_Type_create_resized(temp_type, 0, sizeof(double), &col_type);
+    } else {
+        MPI_Type_contiguous(array.size(0), MPI_DOUBLE, &col_type);
+    }
+    return col_type;
 }
 
 int main(int argc, char **argv) {
@@ -119,6 +157,9 @@ int main(int argc, char **argv) {
     DArray2 gg(ims2, km_bsize), bb(ims2, km_bsize), ff(ims2, km_bsize), phi(ims2, km_bsize);
     DArray2 dd(ims, km_bsize), phi1(ims2, km_bsize), ff1(ims2, km_bsize);
     DArray1 ds(2 * kms);
+
+    auto col_type = makeColType(aa);
+    MPI_Type_commit(&col_type);
 
     ofstream out_lst;
     if (file_output) {
@@ -198,7 +239,7 @@ c         s=dcos(pi*z/zm)
     };
 
     // k, i: jf(i, k) <- aa1(i+-1, k+-1)
-    syncShadows(aa1, 1, rank, size);
+    syncK(aa1, col_type, rank, size);
     for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
         const double s = (1.5 * aa1(2, k) - 4.5 * aa1(1, k)) / hr2 +
                    (aa1(1, k + 1) - 2.0 * aa1(1, k) + aa1(1, k - 1)) / hz2;
@@ -236,7 +277,7 @@ c         s=dcos(pi*z/zm)
 
     // i, k: gg(i, k) <- jf(i, k), jf(i, k + 1)
     // i, k: phi(i, k) <- aa1(i, k), aa1(i, k + 1)
-    syncShadows(jf, 1, rank, size);
+    syncKNext(jf, col_type, rank, size);
     for (int i = 1; i < 2 * im + 1; i++) {
         for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
             gg(i, k) = jf(i, k + 1) - jf(i, k);
@@ -421,7 +462,7 @@ c         s=dcos(pi*z/zm)
 */
 
     // i, k: dd(i, k) <- phi(i+-1, k+-1)
-    syncShadows(phi, 1, rank, size);
+    syncK(phi, col_type, rank, size);
     for (int i = 2; i < im + 1; i++) {
         for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
             dd(i, k) = compCheck(phi, gg, i, k);
@@ -508,7 +549,7 @@ c         s=dcos(pi*z/zm)
 */
 
     // i, k: dd(i, k) <- aa(i+-1, k+-1), jf(i, k)
-    syncShadows(aa, 1, rank, size);
+    syncK(aa, col_type, rank, size);
     for (int i = 2; i < im + 1; i++) {
         for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
             dd(i, k) = compCheck(aa, jf, i, k);

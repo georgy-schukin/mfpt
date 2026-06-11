@@ -54,6 +54,10 @@ public:
         return (x + _shadow_size[0]) * fullSize(1) + y + _shadow_size[1];
     }
 
+    bool isRowMajorOrder() const {
+        return true;
+    }
+
     template <typename Index>
     size_t atRaw(Index x, Index y) const {
         return x * fullSize(1) + y;
