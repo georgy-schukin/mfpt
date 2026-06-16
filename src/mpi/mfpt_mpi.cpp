@@ -51,6 +51,26 @@ void output(const string &header, const DArray2 &data, const std::array<int, 4> 
     output(header, data, range[0], range[1], range[2], range[3], out);
 }
 
+MPI_Datatype makeColType(const DArray2 &array) {
+    MPI_Datatype col_type;
+    if (array.isRowMajorOrder()) {
+        MPI_Datatype temp_type;
+        MPI_Type_vector(array.size(0), 1, array.fullSize(1), MPI_DOUBLE, &temp_type);
+        MPI_Type_create_resized(temp_type, 0, sizeof(double), &col_type);
+    } else {
+        MPI_Type_contiguous(array.size(0), MPI_DOUBLE, &col_type);
+    }
+    MPI_Type_commit(&col_type);
+    return col_type;
+}
+
+MPI_Datatype makeDataSendType(const DArray2 &array) {
+    MPI_Datatype send_type;
+    MPI_Type_vector(array.size(0), array.size(1), array.size(1) + 2 * array.shadowSize(1), MPI_DOUBLE, &send_type);
+    MPI_Type_commit(&send_type);
+    return send_type;
+}
+
 void syncKPrev(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
     if (rank > 0) {
         MPI_Request req[2];
@@ -78,13 +98,15 @@ void syncK(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
     syncKNext(arr, col_type, rank, size);
 }
 
-DArray2 gatherArrayK(const DArray2 &local_data, MPI_Datatype send_type, const BlockDecomposition &k_decomp, int im_size, int km_size, int rank, int size) {
+DArray2 gatherArrayK(const DArray2 &local_data, const BlockDecomposition &k_decomp, int im_size, int km_size, int rank, int size) {
     std::vector<MPI_Request> reqs;
     if (rank == 0) {
         reqs.resize(size + 1);
     } else {
         reqs.resize(1);
     }
+
+    auto send_type = makeDataSendType(local_data);
 
     MPI_Isend(&local_data(0, 0), 1, send_type, 0, GATHER_TAG, MPI_COMM_WORLD, &reqs[0]);
 
@@ -108,31 +130,13 @@ DArray2 gatherArrayK(const DArray2 &local_data, MPI_Datatype send_type, const Bl
                 }
             }
         }
+        MPI_Type_free(&send_type);
         return arr;
     } else {
         MPI_Waitall(reqs.size(), reqs.data(), MPI_STATUSES_IGNORE);
+        MPI_Type_free(&send_type);
     }
     return DArray2();
-}
-
-MPI_Datatype makeColType(const DArray2 &array) {
-    MPI_Datatype col_type;
-    if (array.isRowMajorOrder()) {
-        MPI_Datatype temp_type;
-        MPI_Type_vector(array.size(0), 1, array.fullSize(1), MPI_DOUBLE, &temp_type);
-        MPI_Type_create_resized(temp_type, 0, sizeof(double), &col_type);
-    } else {
-        MPI_Type_contiguous(array.size(0), MPI_DOUBLE, &col_type);
-    }
-    MPI_Type_commit(&col_type);
-    return col_type;
-}
-
-MPI_Datatype makeDataSendType(const DArray2 &array) {
-    MPI_Datatype send_type;
-    MPI_Type_vector(array.size(0), array.size(1), array.size(1) + 2 * array.shadowSize(1), MPI_DOUBLE, &send_type);
-    MPI_Type_commit(&send_type);
-    return send_type;
 }
 
 int main(int argc, char **argv) {
@@ -207,7 +211,6 @@ int main(int argc, char **argv) {
     DArray1 ds(2 * kms);
 
     auto col_type = makeColType(aa);
-    auto send_type = makeDataSendType(aa);
 
     const std::array<int, 4> output_range = {0, 7, 0, 6};
 
@@ -217,7 +220,7 @@ int main(int argc, char **argv) {
     }
 
     auto gatherAndOutput = [&](const std::string &header, const DArray2 &local_data) {
-        const auto arr = gatherArrayK(local_data, send_type, kms_decomp, ims2, kms, rank, size);
+        const auto arr = gatherArrayK(local_data, kms_decomp, ims2, kms, rank, size);
         if (rank == 0) {
             output(header, arr, output_range, out_lst);
         }
@@ -306,7 +309,6 @@ c         s=dcos(pi*z/zm)
 
     if (file_output) {
         gatherAndOutput("aa1 aa1", aa1);
-        //output("aa1 aa1", aa1, output_range, out_lst);
         gatherAndOutput("jf jf", jf);
     }
 
@@ -340,13 +342,18 @@ c         s=dcos(pi*z/zm)
     // i, k: gg(i, k) <- jf(i, k), jf(i, k + 1)
     // i, k: phi(i, k) <- aa1(i, k), aa1(i, k + 1)
     syncKNext(jf, col_type, rank, size);
-    for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
-        for (int i = 1; i < 2 * im + 1; i++) {
+    for (int i = 1; i < 2 * im + 1; i++) {
+        for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
             gg(i, k) = jf(i, k + 1) - jf(i, k);
             phi1(i, k) = aa1(i, k + 1) - aa1(i, k);
         }
+        setOnK(gg, i, 0, 0.0);
+        setOnK(gg, i, km, 0.0);
+        setOnK(phi1, i, 0, 0.0);
+        setOnK(phi1, i, km, 0.0);
+
     }
-    doOnK(0, [&](int k) {
+    /*doOnK(0, [&](int k) {
         for (int i = 1; i < 2 * im + 1; i++) {
             gg(i, k) = 0.0;
             phi1(i, k) = 0.0;
@@ -357,7 +364,7 @@ c         s=dcos(pi*z/zm)
             gg(i, k) = 0.0;
             phi1(i, k) = 0.0;
         }
-    });
+    });*/
 
     if (file_output) {
         gatherAndOutput("gg gg", gg);
@@ -412,8 +419,8 @@ c         s=dcos(pi*z/zm)
                 if (k1 >= 2 * km) {
                     k1 = k1 - 2 * km;
                 }
-                s1 += gg(i, k) * ds[k1];
-                s2 += phi1(i, k) * ds[k1];
+                s1 += gg(i, k) * ds[(k * j) % (2 * km)];
+                s2 += phi1(i, k) * ds[(k * j) % (2 * km)];
             }
             bb(i, j) = s1 / km2;
             ff1(i, j) = s2 / km2;

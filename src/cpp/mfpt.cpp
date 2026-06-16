@@ -213,16 +213,23 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
+    auto compSolution = [hr2, hz2](const DArray2 &phi, int i, int k) {
+        return (((i + 0.5) * phi(i + 1, k) - (i - 0.5) * phi(i, k)) / (i) -
+                ((i - 0.5) * phi(i, k) - (i - 1.5) * phi(i - 1, k)) / (i - 1.0)) / hr2 +
+               (phi(i, k + 1) - 2.0 * phi(i, k) + phi(i, k - 1)) / hz2;
+    };
+
+    auto compCheck = [&compSolution](const DArray2 &phi, const DArray2 &gg, int i, int k) {
+        return compSolution(phi, i, k) + gg(i, k);
+    };
+
     // k, i: jf(i, k) <- aa1(i+-1, k+-1)
     for (int k = 1; k < km + 1; k++) {
         double s = (1.5 * aa1(2, k) - 4.5 * aa1(1, k)) / hr2 +
                    (aa1(1, k + 1) - 2.0 * aa1(1, k) + aa1(1, k - 1)) / hz2;
         jf(1, k) = -s;
-        for (int i = 2; i < 2 * im + 1; i++) {
-            s = (((i + 1 - 0.5) * aa1(i + 1, k) - (i + 1 - 1.5) * aa1(i, k)) / (i + 1 - 1.0) -
-                 ((i + 1 - 1.5) * aa1(i, k) - (i + 1 - 2.5) * aa1(i - 1, k)) / (i + 1 - 2.0)) / hr2 +
-                (aa1(i, k + 1) - 2.0 * aa1(i, k) + aa1(i, k - 1)) / hz2;
-            jf(i, k) = -s;
+        for (int i = 2; i < 2 * im + 1; i++) {            
+            jf(i, k) = -compSolution(aa1, i, k);
         }
     }
 
@@ -434,9 +441,7 @@ c         s=dcos(pi*z/zm)
     // i, k: dd(i, k) <- phi(i+-1, k+-1)
     for (int i = 2; i < im + 1; i++) {
         for (int k = 1; k < km; k++) {
-            dd(i, k) = (((i + 1 - 0.5) * phi(i + 1, k) - (i + 1 - 1.5) * phi(i, k)) / (i + 1 - 1.0) -
-                        ((i + 1 - 1.5) * phi(i, k) - (i + 1 - 2.5) * phi(i - 1, k)) / (i + 1 - 2.0)) / hr2 +
-                       (phi(i, k + 1) - 2.0 * phi(i, k) + phi(i, k - 1)) / hz2 + gg(i, k);
+            dd(i, k) = compCheck(phi, gg, i, k);
         }
     }
 
@@ -522,10 +527,7 @@ c         s=dcos(pi*z/zm)
     // i, k: dd(i, k) <- aa(i+-1, k+-1), jf(i, k)
     for (int i = 2; i < im + 1; i++) {
         for (int k = 1; k < km + 1; k++) {
-            dd(i, k) = (((i + 1 - 0.5) * aa(i + 1, k) - (i + 1 - 1.5) * aa(i, k)) / (i + 1 - 1.0) -
-                        ((i + 1 - 1.5) * aa(i, k) - (i + 1 - 2.5) * aa(i - 1, k)) / (i + 1 - 2.0)) / hr2 +
-                       (aa(i, k + 1) - 2.0 * aa(i, k) + aa(i, k - 1)) / hz2 + jf(i, k);
-
+            dd(i, k) = compCheck(aa, jf, i, k);
         }
     }
 
