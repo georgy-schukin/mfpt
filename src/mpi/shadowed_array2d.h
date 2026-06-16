@@ -11,12 +11,12 @@ public:
     ShadowedArray2D(size_t sx, size_t sy, size_t shadow_sx = 0, size_t shadow_sy = 0) :
         _size {sx, sy},
         _shadow_size {shadow_sx, shadow_sy},
-        _data((sx + 2 * shadow_sx) * (sy + 2 * shadow_sy)) {
+        _data((sx + 2 * shadow_sx) * (sy + 2 * shadow_sy), T {}) {
     }
     ShadowedArray2D(const std::array<size_t, 2> &sz, const std::array<size_t, 2> &shadow_sz = {0, 0}) :
         _size(sz),
         _shadow_size(shadow_sz),
-        _data((sz[0] + 2 * shadow_sz[0]) * (sz[1] + 2 * shadow_sz[1])) {
+        _data((sz[0] + 2 * shadow_sz[0]) * (sz[1] + 2 * shadow_sz[1]), T {}) {
     }
 
     void populate(const T* raw_data, size_t data_sz) {

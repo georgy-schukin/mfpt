@@ -11,6 +11,8 @@
 #include <cmath>
 #include <string>
 #include <chrono>
+#include <functional>
+#include <exception>
 
 using namespace std;
 
@@ -19,8 +21,9 @@ using DArray1 = std::vector<double>;
 
 const int TAG_PREV = 0;
 const int TAG_NEXT = 1;
+const int GATHER_TAG = 2;
 
-void print(DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
+void print(const DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
     out << setw(7) << "";
     for (int i = i_start; i < i_end; i++) {
         out << setw(3) << i + 1;
@@ -38,13 +41,13 @@ void print(DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstre
     }
 }
 
-void output(const string &header, DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
+void output(const string &header, const DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
     out << "\n";
     out << " " << header << "\n";
     print(data, i_start, i_end, j_start, j_end, out);
 }
 
-void output(const string &header, DArray2 &data, const std::array<int, 4> &range, ofstream &out) {
+void output(const string &header, const DArray2 &data, const std::array<int, 4> &range, ofstream &out) {
     output(header, data, range[0], range[1], range[2], range[3], out);
 }
 
@@ -60,7 +63,7 @@ void syncKPrev(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
 }
 
 void syncKNext(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
-    if (rank < size) {
+    if (rank < size - 1) {
         MPI_Request req[2];
         // Send data column.
         MPI_Isend(&arr(size_t(0), arr.size(1) - 1), 1, col_type, rank + 1, TAG_NEXT, MPI_COMM_WORLD, &req[0]);
@@ -75,6 +78,43 @@ void syncK(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
     syncKNext(arr, col_type, rank, size);
 }
 
+DArray2 gatherArrayK(const DArray2 &local_data, MPI_Datatype send_type, const BlockDecomposition &k_decomp, int im_size, int km_size, int rank, int size) {
+    std::vector<MPI_Request> reqs;
+    if (rank == 0) {
+        reqs.resize(size + 1);
+    } else {
+        reqs.resize(1);
+    }
+
+    MPI_Isend(&local_data(0, 0), 1, send_type, 0, GATHER_TAG, MPI_COMM_WORLD, &reqs[0]);
+
+    if (rank == 0) {
+        std::vector<DArray2> parts;
+        for (int i = 0; i < size; i++) {
+            parts.push_back(DArray2(im_size, k_decomp.getBlockSize(i)));
+        }
+        for (int i = 0; i < size; i++) {
+            MPI_Irecv(parts[i].data(), parts[i].size(), MPI_DOUBLE, i, GATHER_TAG, MPI_COMM_WORLD, &reqs[i + 1]);
+        }
+        MPI_Waitall(reqs.size(), reqs.data(), MPI_STATUSES_IGNORE);
+
+        DArray2 arr(im_size, km_size);
+        for (int r = 0; r < size; r++) {
+            const auto &part = parts[r];
+            const auto k_shift = k_decomp.getBlockShift(r);
+            for (int i = 0; i < (int)part.size(0); i++) {
+                for (int k = 0; k < (int)part.size(1); k++) {
+                    arr(i, k + k_shift) = part(i, k);
+                }
+            }
+        }
+        return arr;
+    } else {
+        MPI_Waitall(reqs.size(), reqs.data(), MPI_STATUSES_IGNORE);
+    }
+    return DArray2();
+}
+
 MPI_Datatype makeColType(const DArray2 &array) {
     MPI_Datatype col_type;
     if (array.isRowMajorOrder()) {
@@ -84,7 +124,15 @@ MPI_Datatype makeColType(const DArray2 &array) {
     } else {
         MPI_Type_contiguous(array.size(0), MPI_DOUBLE, &col_type);
     }
+    MPI_Type_commit(&col_type);
     return col_type;
+}
+
+MPI_Datatype makeDataSendType(const DArray2 &array) {
+    MPI_Datatype send_type;
+    MPI_Type_vector(array.size(0), array.size(1), array.size(1) + 2 * array.shadowSize(1), MPI_DOUBLE, &send_type);
+    MPI_Type_commit(&send_type);
+    return send_type;
 }
 
 int main(int argc, char **argv) {
@@ -159,12 +207,21 @@ int main(int argc, char **argv) {
     DArray1 ds(2 * kms);
 
     auto col_type = makeColType(aa);
-    MPI_Type_commit(&col_type);
+    auto send_type = makeDataSendType(aa);
+
+    const std::array<int, 4> output_range = {0, 7, 0, 6};
 
     ofstream out_lst;
-    if (file_output) {
+    if (file_output && rank == 0) {
         out_lst.open("output.lst");
     }
+
+    auto gatherAndOutput = [&](const std::string &header, const DArray2 &local_data) {
+        const auto arr = gatherArrayK(local_data, send_type, kms_decomp, ims2, kms, rank, size);
+        if (rank == 0) {
+            output(header, arr, output_range, out_lst);
+        }
+    };
 
     const double pi = 3.14159265358979;
     const double c = pi / km;
@@ -174,8 +231,6 @@ int main(int argc, char **argv) {
     const double zm = km * hz;
     const double hr2 = hr * hr;
     const double hz2 = hz * hz;
-
-    const std::array<int, 4> output_range = {0, 7, 0, 6};
 
     auto ts = chrono::steady_clock::now();
 
@@ -250,8 +305,9 @@ c         s=dcos(pi*z/zm)
     }
 
     if (file_output) {
-        output("aa1 aa1", aa1, output_range, out_lst);
-        output("jf jf", jf, output_range, out_lst);
+        gatherAndOutput("aa1 aa1", aa1);
+        //output("aa1 aa1", aa1, output_range, out_lst);
+        gatherAndOutput("jf jf", jf);
     }
 
 /*
@@ -274,23 +330,37 @@ c         s=dcos(pi*z/zm)
             arr(i, my_km_range.toLocal(k)) = value;
         }
     };
+    auto doOnK = [&my_km_range](int k, std::function<void(int)> f) {
+        if (my_km_range.hasIndex(k)) {
+            const auto kk = my_km_range.toLocal(k);
+            f(kk);
+        }
+    };
 
     // i, k: gg(i, k) <- jf(i, k), jf(i, k + 1)
     // i, k: phi(i, k) <- aa1(i, k), aa1(i, k + 1)
     syncKNext(jf, col_type, rank, size);
-    for (int i = 1; i < 2 * im + 1; i++) {
-        for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
+    for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
+        for (int i = 1; i < 2 * im + 1; i++) {
             gg(i, k) = jf(i, k + 1) - jf(i, k);
             phi1(i, k) = aa1(i, k + 1) - aa1(i, k);
         }
-        setOnK(gg, i, 0, 0.0);
-        setOnK(gg, i, km, 0.0);
-        setOnK(phi1, i, 0, 0.0);
-        setOnK(phi1, i, km, 0.0);
     }
+    doOnK(0, [&](int k) {
+        for (int i = 1; i < 2 * im + 1; i++) {
+            gg(i, k) = 0.0;
+            phi1(i, k) = 0.0;
+        }
+    });
+    doOnK(km, [&](int k) {
+        for (int i = 1; i < 2 * im + 1; i++) {
+            gg(i, k) = 0.0;
+            phi1(i, k) = 0.0;
+        }
+    });
 
     if (file_output) {
-        output("gg gg", gg, output_range, out_lst);
+        gatherAndOutput("gg gg", gg);
     }
 
 /*
@@ -331,6 +401,7 @@ c         s=dcos(pi*z/zm)
 
     // i, j: bb(i, j) <- k, gg(i, k)
     // i, j: ff1(i, j) <- k, phi1(i, k)
+    // TODO: parallelize
     const double km2 = km / 2.0;
     for (int i = 1; i < 2 * im + 1; i++) {
         for (int j = 1; j < km; j++) {
@@ -354,7 +425,7 @@ c         s=dcos(pi*z/zm)
     }
 
     if (file_output) {
-        output("bb bb", bb, output_range, out_lst);
+        gatherAndOutput("bb bb", bb);
     }
 
 /*
@@ -380,31 +451,31 @@ c         s=dcos(pi*z/zm)
       enddo     !   j
 */
 
-    // j, i: al(i) <- al(i - 1)
-    // j, i: be(i) <- be(i - 1)
-    // j, i: ff(i, j) <- al(i), be(i), ff(i + 1, j)
-    for (int j = my_km_range.localEnd(1); j < my_km_range.localEnd(km); j++) {
-        const auto jj = my_km_range.toGlobal(j);
-        const double dsin = sin(c * (jj) / 2.0);
+    // k, i: al(i) <- al(i - 1)
+    // k, i: be(i) <- be(i - 1)
+    // k, i: ff(i, k) <- al(i), be(i), ff(i + 1, k)
+    for (int k = my_km_range.localEnd(1); k < my_km_range.localEnd(km); k++) {
+        const auto kk = my_km_range.toGlobal(k);
+        const double dsin = sin(c * kk / 2.0);
         double s = 9.0 / (2.0 * hr2) + (4.0 / hz2) * dsin * dsin;
         al[1] = 3.0 / (2.0 * hr2 * s);
-        be[1] = bb(1, j) / s;
+        be[1] = bb(1, k) / s;
         for (int i = 2; i < 2 * im + 1; i++) {
             s = (2.0 * ((i - 0.5) / hr) * ((i - 0.5) / hr)) / ((i) * (i - 1.0)) +
                 (4.0 / hz2) * dsin * dsin -
                 al[i - 1] * (i - 1.5) / ((i - 1.0) * hr2);
             al[i] = (i + 0.5) / (s * (i) * hr2);
-            be[i] = (be[i - 1] * (i - 1.5) / ((i - 1.0) * hr2) + bb(i, j)) / s;
+            be[i] = (be[i - 1] * (i - 1.5) / ((i - 1.0) * hr2) + bb(i, k)) / s;
         }
-        ff(2 * im + 1, j) = 0.0;
+        ff(2 * im + 1, k) = 0.0;
         for (int i = 2 * im; i >= 1; i--) {
-            ff(i, j) = al[i] * ff(i + 1, j) + be[i];
+            ff(i, k) = al[i] * ff(i + 1, k) + be[i];
         }
     }
 
     if (file_output) {
-        output("ff ff", ff, output_range, out_lst);
-        output("ff1 ff1", ff1, output_range, out_lst);
+        gatherAndOutput("ff ff", ff);
+        gatherAndOutput("ff1 ff1", ff1);
     }
 
 /*
@@ -427,6 +498,7 @@ c         s=dcos(pi*z/zm)
 */
 
     // i, k: phi(i, k) <- j, ff(i, j)
+    // TODO: parallelize
     for (int i = 1; i < 2 * im + 1; i++) {
         for (int k = 1; k < km; k++) {
             double s1 = 0.0;
@@ -445,8 +517,8 @@ c         s=dcos(pi*z/zm)
     }
 
     if (file_output) {
-        output("phi phi", phi, output_range, out_lst);
-        output("phi1 phi1", phi1, output_range, out_lst);
+        gatherAndOutput("phi phi", phi);
+        gatherAndOutput("phi1 phi1", phi1);
     }
 
 /*
@@ -463,14 +535,14 @@ c         s=dcos(pi*z/zm)
 
     // i, k: dd(i, k) <- phi(i+-1, k+-1)
     syncK(phi, col_type, rank, size);
-    for (int i = 2; i < im + 1; i++) {
-        for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
+    for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
+        for (int i = 2; i < im + 1; i++) {
             dd(i, k) = compCheck(phi, gg, i, k);
         }
     }
 
     if (file_output) {
-        output("proverka2 dd dd", dd, output_range, out_lst);
+        gatherAndOutput("proverka2 dd dd", dd);
     }
 
 /*
@@ -495,6 +567,7 @@ c         s=dcos(pi*z/zm)
     // i: al(i) <- al(i - 1)
     // i: be(i) <- be(i - 1), phi(i + 1, 1), jf(i + 1, 1)
     // i: aa(i + 1, 1) <- al(i), be(i), aa(i + 2, 1)
+    // TODO: parallelize
     al[0] = 1.0 / 3.0;
     be[0] = (2.0 * hr2 / 9.0) * (jf(1, 1) + phi(1,1) / hz2);
 
@@ -521,6 +594,7 @@ c         s=dcos(pi*z/zm)
 */
 
     // i, k: aa(i, k + 1) <- aa(i, k), phi(i, k)
+    // TODO: parallelize
     for (int i = 1; i < im + 2; i++) {
         aa(i, 0) = aa(i, 1);
         for (int k = 1; k < km + 1; k++) {
@@ -529,7 +603,7 @@ c         s=dcos(pi*z/zm)
     }
 
     if (file_output) {
-        output("aa aa", aa, output_range, out_lst);
+        gatherAndOutput("aa aa", aa);
     }
 
 /*
@@ -549,15 +623,15 @@ c         s=dcos(pi*z/zm)
 */
 
     // i, k: dd(i, k) <- aa(i+-1, k+-1), jf(i, k)
-    syncK(aa, col_type, rank, size);
-    for (int i = 2; i < im + 1; i++) {
-        for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
+    syncK(aa, col_type, rank, size);    
+    for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
+        for (int i = 2; i < im + 1; i++) {
             dd(i, k) = compCheck(aa, jf, i, k);
         }
     }
 
     if (file_output) {
-        output("dd dd", dd, output_range, out_lst);
+        gatherAndOutput("dd dd", dd);
     }
 
 /*
@@ -592,7 +666,7 @@ c         s=dcos(pi*z/zm)
         }
     }
 
-    if (file_output) {
+    if (file_output && rank == 0) {
         out_lst.close();
     }
 
