@@ -205,8 +205,8 @@ int main(int argc, char **argv) {
 
     DArray2 br(ims, km_bsize), bf(ims, km_bsize), bz(ims, km_bsize);
     DArray1 sb(ims2), jb(ims2), al(ims2), be(ims2);
-    DArray2 aa(ims2, km_bsize, 0, 1), jf(ims2, km_bsize, 0, 1), aa1(ims2, km_bsize, 0, 1);
-    DArray2 gg(ims2, km_bsize), bb(ims2, km_bsize), ff(ims2, km_bsize), phi(ims2, km_bsize);
+    DArray2 aa(ims2, km_bsize, 0, 1), jf(ims2, km_bsize, 0, 1), aa1(ims2, km_bsize, 0, 1), phi(ims2, km_bsize, 0, 1);
+    DArray2 gg(ims2, km_bsize), bb(ims2, km_bsize), ff(ims2, km_bsize);
     DArray2 dd(ims, km_bsize), phi1(ims2, km_bsize), ff1(ims2, km_bsize);
     DArray1 ds(2 * kms);
 
@@ -220,7 +220,7 @@ int main(int argc, char **argv) {
     }
 
     auto gatherAndOutput = [&](const std::string &header, const DArray2 &local_data) {
-        const auto arr = gatherArrayK(local_data, kms_decomp, ims2, kms, rank, size);
+        const auto arr = gatherArrayK(local_data, kms_decomp, local_data.size(0), kms, rank, size);
         if (rank == 0) {
             output(header, arr, output_range, out_lst);
         }
@@ -255,20 +255,24 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
-    // k, i: aa1(i, k) <- expr
-    const double a0 = -0.1;
-    const double a = 1.0;
-    const double d = 1.0;
-    for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 2); k++) {
-        const auto kk = my_km_range.toGlobal(k);
-        const double z = hz * (kk - 0.5);
-        const double z2 = z * z;
-        const double s = a0 * z2 * (z2 - 2.0 * zm * zm) + a * z2 * (z - 1.5 * zm) + d;
-        for (int i = 1; i < 2 * im + 2; i++) {
-            aa1(i, k) = s * (hr * (i - 0.5) * (2.0 * rm - hr * (i - 1.0)));
+    auto initSolution = [&](DArray2 &output) {
+        const double a0 = -0.1;
+        const double a = 1.0;
+        const double d = 1.0;
+        for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 2); k++) {
+            const auto kk = my_km_range.toGlobal(k);
+            const double z = hz * (kk - 0.5);
+            const double z2 = z * z;
+            const double s = a0 * z2 * (z2 - 2.0 * zm * zm) + a * z2 * (z - 1.5 * zm) + d;
+            for (int i = 1; i < 2 * im + 2; i++) {
+                output(i, k) = s * (hr * (i - 0.5) * (2.0 * rm - hr * (i - 1.0)));
+            }
+            output(0, k) = -output(1, k);
         }
-        aa1(0, k) = -aa1(1, k);
-    }
+    };
+
+    // k, i: aa1(i, k) <- expr
+    initSolution(aa1);
 
 /*
     тестовые токи
@@ -292,20 +296,20 @@ c         s=dcos(pi*z/zm)
                (phi(i, k + 1) - 2.0 * phi(i, k) + phi(i, k - 1)) / hz2;
     };
 
-    auto compCheck = [&compSolution](const DArray2 &phi, const DArray2 &gg, int i, int k) {
-        return compSolution(phi, i, k) + gg(i, k);
+    auto initCurrent = [&](DArray2 &input, DArray2 &output) {
+        syncK(input, col_type, rank, size);
+        for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
+            const double s = (1.5 * input(2, k) - 4.5 * input(1, k)) / hr2 +
+                             (input(1, k + 1) - 2.0 * input(1, k) + input(1, k - 1)) / hz2;
+            output(1, k) = -s;
+            for (int i = 2; i < 2 * im + 1; i++) {
+                output(i, k) = -compSolution(input, i, k);
+            }
+        }
     };
 
     // k, i: jf(i, k) <- aa1(i+-1, k+-1)
-    syncK(aa1, col_type, rank, size);
-    for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
-        const double s = (1.5 * aa1(2, k) - 4.5 * aa1(1, k)) / hr2 +
-                   (aa1(1, k + 1) - 2.0 * aa1(1, k) + aa1(1, k - 1)) / hz2;
-        jf(1, k) = -s;
-        for (int i = 2; i < 2 * im + 1; i++) {
-            jf(i, k) = -compSolution(aa1, i, k);
-        }
-    }
+    initCurrent(aa1, jf);
 
     if (file_output) {
         gatherAndOutput("aa1 aa1", aa1);
@@ -339,32 +343,21 @@ c         s=dcos(pi*z/zm)
         }
     };
 
-    // i, k: gg(i, k) <- jf(i, k), jf(i, k + 1)
-    // i, k: phi(i, k) <- aa1(i, k), aa1(i, k + 1)
-    syncKNext(jf, col_type, rank, size);
-    for (int i = 1; i < 2 * im + 1; i++) {
-        for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
-            gg(i, k) = jf(i, k + 1) - jf(i, k);
-            phi1(i, k) = aa1(i, k + 1) - aa1(i, k);
+    auto computeDifference = [&](DArray2 &input, DArray2 &output) {
+        syncKNext(input, col_type, rank, size);
+        for (int i = 1; i < 2 * im + 1; i++) {
+            for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
+                output(i, k) = input(i, k + 1) - input(i, k);
+            }
+            setOnK(output, i, 0, 0.0);
+            setOnK(output, i, km, 0.0);
         }
-        setOnK(gg, i, 0, 0.0);
-        setOnK(gg, i, km, 0.0);
-        setOnK(phi1, i, 0, 0.0);
-        setOnK(phi1, i, km, 0.0);
+    };
 
-    }
-    /*doOnK(0, [&](int k) {
-        for (int i = 1; i < 2 * im + 1; i++) {
-            gg(i, k) = 0.0;
-            phi1(i, k) = 0.0;
-        }
-    });
-    doOnK(km, [&](int k) {
-        for (int i = 1; i < 2 * im + 1; i++) {
-            gg(i, k) = 0.0;
-            phi1(i, k) = 0.0;
-        }
-    });*/
+    // i, k: gg(i, k) <- jf(i, k), jf(i, k + 1)
+    // i, k: phi1(i, k) <- aa1(i, k), aa1(i, k + 1)
+    computeDifference(jf, gg);
+    computeDifference(aa1, phi1);
 
     if (file_output) {
         gatherAndOutput("gg gg", gg);
@@ -406,30 +399,26 @@ c         s=dcos(pi*z/zm)
       enddo    ! i
 */
 
+    // TODO: parallelize
+    auto computeFFT = [&](const DArray2 &input, DArray2 &output) {
+        const double km2 = km / 2.0;
+        for (int i = 1; i < 2 * im + 1; i++) {
+            for (int j = 1; j < km; j++) {
+                double s = 0.0;
+                for (int k = 1; k < km; k++) {
+                    s += input(i, k) * ds[(k * j) % (2 * km)];
+                }
+                output(i, j) = s / km2;
+            }
+            setOnK(output, i, 0, 0.0);
+            setOnK(output, i, km, 0.0);
+        }
+    };
+
     // i, j: bb(i, j) <- k, gg(i, k)
     // i, j: ff1(i, j) <- k, phi1(i, k)
-    // TODO: parallelize
-    const double km2 = km / 2.0;
-    for (int i = 1; i < 2 * im + 1; i++) {
-        for (int j = 1; j < km; j++) {
-            double s1 = 0.0, s2 = 0.0;
-            int k1 = 0;
-            for (int k = 1; k < km; k++) {
-                k1 = k1 + j;
-                if (k1 >= 2 * km) {
-                    k1 = k1 - 2 * km;
-                }
-                s1 += gg(i, k) * ds[(k * j) % (2 * km)];
-                s2 += phi1(i, k) * ds[(k * j) % (2 * km)];
-            }
-            bb(i, j) = s1 / km2;
-            ff1(i, j) = s2 / km2;
-        }
-        setOnK(bb, i, 0, 0.0);
-        setOnK(bb, i, km, 0.0);
-        setOnK(ff1, i, 0, 0.0);
-        setOnK(ff1, i, km, 0.0);
-    }
+    computeFFT(gg, bb);
+    computeFFT(phi1, ff1);
 
     if (file_output) {
         gatherAndOutput("bb bb", bb);
@@ -506,22 +495,22 @@ c         s=dcos(pi*z/zm)
 
     // i, k: phi(i, k) <- j, ff(i, j)
     // TODO: parallelize
-    for (int i = 1; i < 2 * im + 1; i++) {
-        for (int k = 1; k < km; k++) {
-            double s1 = 0.0;
-            int k1 = 0;
-            for (int j = 1; j < km; j++) {
-                k1 = k1 + k;
-                if (k1 >= 2 * km) {
-                    k1 = k1 - 2 * km;
+
+    auto computeFFTInverse = [&](const DArray2 &input, DArray2 &output) {
+        for (int i = 1; i < 2 * im + 1; i++) {
+            for (int k = 1; k < km; k++) {
+                double s = 0.0;
+                for (int j = 1; j < km; j++) {
+                    s = s + input(i, j) * ds[(k * j) % (2 * km)];
                 }
-                s1 = s1 + ff(i, j) * ds[k1];
+                output(i, k) = s;
             }
-            phi(i, k) = s1;
+            setOnK(output, i, 0, 0.0);
+            setOnK(output, i, km, 0.0);
         }
-        setOnK(phi, i, 0, 0.0);
-        setOnK(phi, i, km, 0.0);
-    }
+    };
+
+    computeFFTInverse(ff, phi);
 
     if (file_output) {
         gatherAndOutput("phi phi", phi);
@@ -540,13 +529,17 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
-    // i, k: dd(i, k) <- phi(i+-1, k+-1)
-    syncK(phi, col_type, rank, size);
-    for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
-        for (int i = 2; i < im + 1; i++) {
-            dd(i, k) = compCheck(phi, gg, i, k);
+    auto computeSolutionDifference = [&](DArray2 &first, const DArray2 &second, DArray2 &output) {
+        syncK(first, col_type, rank, size);
+        for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
+            for (int i = 2; i < im + 1; i++) {
+                output(i, k) = compSolution(first, i, k) + second(i, k);
+            }
         }
-    }
+    };
+
+    // i, k: dd(i, k) <- phi(i+-1, k+-1), gg(i, k)
+    computeSolutionDifference(phi, gg, dd);
 
     if (file_output) {
         gatherAndOutput("proverka2 dd dd", dd);
@@ -630,12 +623,7 @@ c         s=dcos(pi*z/zm)
 */
 
     // i, k: dd(i, k) <- aa(i+-1, k+-1), jf(i, k)
-    syncK(aa, col_type, rank, size);    
-    for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
-        for (int i = 2; i < im + 1; i++) {
-            dd(i, k) = compCheck(aa, jf, i, k);
-        }
-    }
+    computeSolutionDifference(aa, jf, dd);
 
     if (file_output) {
         gatherAndOutput("dd dd", dd);
@@ -667,6 +655,7 @@ c         s=dcos(pi*z/zm)
     }
 
     // k, i: br(i, k) <- aa(i, k), aa(i, k + 1)
+    syncKNext(aa, col_type, rank, size);
     for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 1); k++) {
         for (int i = 0; i < im + 2; i++) {
             br(i, k) = -(aa(i, k + 1) - aa(i, k)) / hz;
