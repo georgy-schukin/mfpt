@@ -139,6 +139,14 @@ DArray2 gatherArrayK(const DArray2 &local_data, const BlockDecomposition &k_deco
     return DArray2();
 }
 
+DArray1 computeSins(size_t size, double coeff) {
+    DArray1 dsins(size);
+    for (int k = 0; k < size; k++) {
+        dsins[k] = sin(coeff * k);
+    }
+    return dsins;
+}
+
 int main(int argc, char **argv) {
 /*
     program brbz003c
@@ -208,7 +216,7 @@ int main(int argc, char **argv) {
     DArray2 aa(ims2, km_bsize, 0, 1), jf(ims2, km_bsize, 0, 1), aa1(ims2, km_bsize, 0, 1), phi(ims2, km_bsize, 0, 1);
     DArray2 gg(ims2, km_bsize), bb(ims2, km_bsize), ff(ims2, km_bsize);
     DArray2 dd(ims, km_bsize), phi1(ims2, km_bsize), ff1(ims2, km_bsize);
-    DArray1 ds(2 * kms);
+    //DArray1 dsins(2 * kms);
 
     auto col_type = makeColType(aa);
 
@@ -370,9 +378,7 @@ c         s=dcos(pi*z/zm)
          ds(k)=dsin(c*k)
       enddo
 */
-    for (int k = 0; k < 2 * km; k++) {
-        ds[k] = sin(c * k);
-    }
+    const auto dsins = computeSins(2 * km, c);
 
 /*
     преобразование Фурье для правых частей и для решения
@@ -410,7 +416,7 @@ c         s=dcos(pi*z/zm)
                     for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
                         const auto kk = my_km_range.toGlobal(k);
                         const auto jj = my_km_range.toGlobal(j);
-                        s += input(i, k) * ds[(kk * jj) % (2 * km)];
+                        s += input(i, k) * dsins[(kk * jj) % dsins.size()];
                     }
                     tmp(i, j) = s * coeff;
                 }
