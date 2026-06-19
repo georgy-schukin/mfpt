@@ -399,20 +399,38 @@ c         s=dcos(pi*z/zm)
       enddo    ! i
 */
 
-    // TODO: parallelize
-    auto computeFFT = [&](const DArray2 &input, DArray2 &output) {
-        const double km2 = km / 2.0;
-        for (int i = 1; i < 2 * im + 1; i++) {
-            for (int j = 1; j < km; j++) {
-                double s = 0.0;
-                for (int k = 1; k < km; k++) {
-                    s += input(i, k) * ds[(k * j) % (2 * km)];
+    auto computeFFTAux = [&](const DArray2 &input, DArray2 &output, double coeff) {
+        for (int r = 0; r < size; r++) {
+            DArray2 tmp(output.size(0), kms_decomp.getBlockSize(r));
+            for (int i = 1; i < 2 * im + 1; i++) {
+                const auto j_start = kms_decomp.getRange(r).localStart(1);
+                const auto j_end = kms_decomp.getRange(r).localEnd(km);
+                for (int j = j_start; j < j_end; j++) {
+                    double s = 0.0;
+                    for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
+                        const auto kk = my_km_range.toGlobal(k);
+                        const auto jj = my_km_range.toGlobal(j);
+                        s += input(i, k) * ds[(kk * jj) % (2 * km)];
+                    }
+                    tmp(i, j) = s * coeff;
                 }
-                output(i, j) = s / km2;
             }
-            setOnK(output, i, 0, 0.0);
-            setOnK(output, i, km, 0.0);
+            // Create tmp array with no shadows to use MPI Reduce.
+            DArray2 output_tmp;
+            if (rank == r) {
+                output_tmp = DArray2(output.size(0), output.size(1));
+            }
+            MPI_Reduce(tmp.data(), output_tmp.data(), tmp.size(), MPI_DOUBLE, MPI_SUM, r, MPI_COMM_WORLD);
+            copy(output_tmp, output);
         }
+    };
+
+    auto computeFFT = [&computeFFTAux, km](const DArray2 &input, DArray2 &output) {
+        computeFFTAux(input, output, 2.0 / km);
+    };
+
+    auto computeFFTInverse = [&computeFFTAux](const DArray2 &input, DArray2 &output) {
+        computeFFTAux(input, output, 1.0);
     };
 
     // i, j: bb(i, j) <- k, gg(i, k)
@@ -494,22 +512,6 @@ c         s=dcos(pi*z/zm)
 */
 
     // i, k: phi(i, k) <- j, ff(i, j)
-    // TODO: parallelize
-
-    auto computeFFTInverse = [&](const DArray2 &input, DArray2 &output) {
-        for (int i = 1; i < 2 * im + 1; i++) {
-            for (int k = 1; k < km; k++) {
-                double s = 0.0;
-                for (int j = 1; j < km; j++) {
-                    s = s + input(i, j) * ds[(k * j) % (2 * km)];
-                }
-                output(i, k) = s;
-            }
-            setOnK(output, i, 0, 0.0);
-            setOnK(output, i, km, 0.0);
-        }
-    };
-
     computeFFTInverse(ff, phi);
 
     if (file_output) {

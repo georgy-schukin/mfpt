@@ -3,6 +3,7 @@
 #include <vector>
 #include <array>
 #include <cstddef>
+#include <algorithm>
 
 template <typename T>
 class ShadowedArray2D {
@@ -12,6 +13,11 @@ public:
         _size {sx, sy},
         _shadow_size {shadow_sx, shadow_sy},
         _data((sx + 2 * shadow_sx) * (sy + 2 * shadow_sy), T {}) {
+    }
+    ShadowedArray2D(size_t sx, size_t sy, const T &value, size_t shadow_sx, size_t shadow_sy) :
+        _size {sx, sy},
+        _shadow_size {shadow_sx, shadow_sy},
+        _data((sx + 2 * shadow_sx) * (sy + 2 * shadow_sy), value) {
     }
     ShadowedArray2D(const std::array<size_t, 2> &sz, const std::array<size_t, 2> &shadow_sz = {0, 0}) :
         _size(sz),
@@ -104,3 +110,14 @@ private:
     std::array<size_t, 2> _shadow_size;
     typename std::vector<T> _data;
 };
+
+template <typename T>
+void copy(const ShadowedArray2D<T> &src, ShadowedArray2D<T> &dst, size_t start_x = 0, size_t start_y = 0) {
+    const auto end_x = std::min(dst.size(0), src.size(0) + start_x);
+    const auto end_y = std::min(dst.size(1), src.size(1) + start_y);
+    for (size_t i = 0; i < end_x; i++) {
+        for (size_t j = 0; j < end_y; j++) {
+            dst(i + start_x, j + start_y) = src(i, j);
+        }
+    }
+}
