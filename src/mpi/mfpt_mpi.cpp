@@ -141,10 +141,49 @@ DArray2 gatherArrayK(const DArray2 &local_data, const BlockDecomposition &k_deco
 
 DArray1 computeSins(size_t size, double coeff) {
     DArray1 dsins(size);
-    for (int k = 0; k < size; k++) {
+    for (size_t k = 0; k < size; k++) {
         dsins[k] = sin(coeff * k);
     }
     return dsins;
+}
+
+void reduceSumOpVector(void *in, void *inout, int *len, MPI_Datatype *dtype) {
+    if (*len != 1) {
+        throw std::runtime_error("Not implemented for len != 1");
+    }
+
+    int nints, naddresses, ntypes, combiner;
+    MPI_Type_get_envelope(*dtype, &nints, &naddresses, &ntypes, &combiner);
+    if (combiner != MPI_COMBINER_VECTOR) {
+        throw std::runtime_error("Non-vector datatype");
+    }
+
+    int vecargs [nints];
+    MPI_Aint vecaddrs[naddresses];
+    MPI_Datatype vectypes[ntypes];
+    MPI_Type_get_contents(*dtype, nints, naddresses, ntypes, vecargs, vecaddrs, vectypes);
+
+    if (vectypes[0] != MPI_DOUBLE) {
+        throw std::runtime_error("Not a vector of doubles");
+    }
+
+    int count = vecargs[0];
+    int blocklen = vecargs[1];
+    int stride = vecargs[2];
+
+    double *invec = (double*)in;
+    double *inoutvec = (double*)inout;
+    for (int i = 0; i < count; i++) {
+        for(int j = 0; j < blocklen; j++) {
+            inoutvec[i * stride + j] += invec[i * stride + j];
+        }
+    }
+}
+
+MPI_Op makeVectorSumOp() {
+    MPI_Op op;
+    MPI_Op_create(&reduceSumOpVector, 1, &op);
+    return op;
 }
 
 int main(int argc, char **argv) {
@@ -405,9 +444,11 @@ c         s=dcos(pi*z/zm)
       enddo    ! i
 */
 
+    auto vector_sum_op = makeVectorSumOp();
+
     auto computeFFTAux = [&](const DArray2 &input, DArray2 &output, double coeff) {
         for (int r = 0; r < size; r++) {
-            DArray2 tmp(output.size(0), kms_decomp.getBlockSize(r));
+            DArray2 tmp(output.size(0), kms_decomp.getBlockSize(r), 0.0, output.shadowSize(0), output.shadowSize(1));
             for (int i = 1; i < 2 * im + 1; i++) {
                 const auto j_start = kms_decomp.getRange(r).localStart(1);
                 const auto j_end = kms_decomp.getRange(r).localEnd(km);
@@ -421,13 +462,9 @@ c         s=dcos(pi*z/zm)
                     tmp(i, j) = s * coeff;
                 }
             }
-            // Create tmp array with no shadows to use MPI Reduce.
-            DArray2 output_tmp;
-            if (rank == r) {
-                output_tmp = DArray2(output.size(0), output.size(1));
-            }
-            MPI_Reduce(tmp.data(), output_tmp.data(), tmp.size(), MPI_DOUBLE, MPI_SUM, r, MPI_COMM_WORLD);
-            copy(output_tmp, output);
+            auto type = makeDataSendType(tmp);
+            MPI_Reduce(tmp.data(), output.data(), 1, type, vector_sum_op, r, MPI_COMM_WORLD);
+            MPI_Type_free(&type);
         }
     };
 
