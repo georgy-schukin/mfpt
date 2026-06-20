@@ -318,7 +318,7 @@ c  902 format(7x,8(i3,9x))
     3 v(i+1-n1)=b(i,l)
       write(25,903) l02,(v(i),i=1,n3)
 c  903 format(i3,1x,8e12.4)
-  903 format(i3,1x,8f9.3)
+  903 format(i3,1x,8f10.3)
     4 continue
       if(n2.eq.m1) goto 1
       n1=n1+8
@@ -349,7 +349,7 @@ c  902 format(7x,8(i3,9x))
     3 v(i+1-n1)=b(i,l)
       write(25,903) l02,(v(i),i=1,n3)
 c  903 format(i3,1x,8e12.4)
-  903 format(i3,1x,8f9.3)
+  903 format(i3,1x,8f10.3)
     4 continue
       if(n2.eq.m1) goto 1
       n1=n1+8

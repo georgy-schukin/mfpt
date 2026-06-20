@@ -35,7 +35,7 @@ void print(const DArray2 &data, int i_start, int i_end, int j_start, int j_end, 
     for (int j = j_end - 1; j >= j_start; j--) {
         out << setw(3) << j + 1 << setw(1) << "";
         for (int i = i_start; i < i_end; i++) {
-            out << setw(9) << std::fixed << setprecision(3) << data(i, j);
+            out << setw(10) << std::fixed << setprecision(3) << data(i, j);
         }
         out << std::endl;
     }
@@ -226,6 +226,7 @@ int main(int argc, char **argv) {
     const int IM_DEF = 20;
     const int KM_DEF = 60;
     const int FOUT_DEF = 1;
+    const int FULL_OUTPUT_DEF = 0;
 
     int rank, size;
 
@@ -239,7 +240,9 @@ int main(int argc, char **argv) {
             cout << argv[0] <<
                 " [im=" << IM_DEF << "]" <<
                 " [km=" << KM_DEF << "]" <<
-                " [file_output=" << FOUT_DEF << "]" << endl;
+                " [file_output=" << FOUT_DEF << "]" <<
+                " [full_output=" << FULL_OUTPUT_DEF << "]" <<
+                endl;
             return 0;
         }
     }
@@ -247,6 +250,7 @@ int main(int argc, char **argv) {
     const int im = (argc > 1) ? stoi(argv[1]) : IM_DEF;
     const int km = (argc > 2) ? stoi(argv[2]) : KM_DEF;
     const bool file_output = (argc > 3) ? stoi(argv[3]) : FOUT_DEF;
+    const bool full_output = (argc > 4) ? stoi(argv[4]) : FULL_OUTPUT_DEF;
 
 /*
     real*8 br(imp,kmp),bf(imp,kmp),bz(imp,kmp)
@@ -295,9 +299,15 @@ int main(int argc, char **argv) {
     }
 
     auto gatherAndOutput = [&](const std::string &header, const DArray2 &local_data) {
-        const auto arr = gatherArrayK(local_data, kms_decomp, local_data.size(0), kms, rank, size);
-        if (rank == 0) {
-            output(header, arr, output_range, out_lst);
+        if (file_output) {
+            const auto arr = gatherArrayK(local_data, kms_decomp, local_data.size(0), kms, rank, size);
+            if (rank == 0) {
+                if (full_output) {
+                    output(header, arr, {0, arr.size(0), 0, arr.size(1)}, out_lst);
+                } else {
+                    output(header, arr, output_range, out_lst);
+                }
+            }
         }
     };
 
@@ -386,10 +396,8 @@ c         s=dcos(pi*z/zm)
     // k, i: jf(i, k) <- aa1(i+-1, k+-1)
     initCurrent(aa1, jf);
 
-    if (file_output) {
-        gatherAndOutput("aa1 aa1", aa1);
-        gatherAndOutput("jf jf", jf);
-    }
+    gatherAndOutput("aa1 aa1", aa1);
+    gatherAndOutput("jf jf", jf);
 
 /*
     вычисление разностей
@@ -434,9 +442,7 @@ c         s=dcos(pi*z/zm)
     computeDifference(jf, gg);
     computeDifference(aa1, phi1);
 
-    if (file_output) {
-        gatherAndOutput("gg gg", gg);
-    }
+    gatherAndOutput("gg gg", gg);
 
 /*
     вычисление синусов
@@ -509,9 +515,7 @@ c         s=dcos(pi*z/zm)
     computeFFT(gg, bb);
     computeFFT(phi1, ff1);
 
-    if (file_output) {
-        gatherAndOutput("bb bb", bb);
-    }
+    gatherAndOutput("bb bb", bb);
 
 /*
     прогонка по радиусу
@@ -564,10 +568,8 @@ c         s=dcos(pi*z/zm)
     // i: seq, k: par
     computeProgonka(bb, ff);
 
-    if (file_output) {
-        gatherAndOutput("ff ff", ff);
-        gatherAndOutput("ff1 ff1", ff1);
-    }
+    gatherAndOutput("ff ff", ff);
+    gatherAndOutput("ff1 ff1", ff1);
 
 /*
     обратное преобразование Фурье
@@ -591,10 +593,8 @@ c         s=dcos(pi*z/zm)
     // i, k: phi(i, k) <- j, ff(i, j)
     computeFFTInverse(ff, phi);
 
-    if (file_output) {
-        gatherAndOutput("phi phi", phi);
-        gatherAndOutput("phi1 phi1", phi1);
-    }
+    gatherAndOutput("phi phi", phi);
+    gatherAndOutput("phi1 phi1", phi1);
 
 /*
     proverka2 решения dd dd
@@ -608,21 +608,19 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
-    auto computeSolutionDifference = [&](DArray2 &first, const DArray2 &second, DArray2 &output) {
+    auto computeSolutionDifference = [&](DArray2 &first, const DArray2 &second) -> DArray2 {
         syncK(first, col_type, rank, size);
+        DArray2 output(im + 2, my_km_range.size());
         for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
             for (int i = 2; i < im + 1; i++) {
-                output(i, k) = getSolution(first, i, k) + second(i, k);
+                output(i, k) = std::abs(getSolution(first, i, k) + second(i, k));
             }
         }
+        return output;
     };
 
     // i, k: dd(i, k) <- phi(i+-1, k+-1), gg(i, k)
-    computeSolutionDifference(phi, gg, dd);
-
-    if (file_output) {
-        gatherAndOutput("proverka2 dd dd", dd);
-    }
+    gatherAndOutput("proverka2 dd dd", computeSolutionDifference(phi, gg));
 
 /*
     решение при к=2
@@ -685,9 +683,7 @@ c         s=dcos(pi*z/zm)
 
     compSolution(phi, jf, aa);
 
-    if (file_output) {
-        gatherAndOutput("aa aa", aa);
-    }
+    gatherAndOutput("aa aa", aa);
 
 /*
     proverka3 решения dd dd
@@ -702,11 +698,7 @@ c         s=dcos(pi*z/zm)
 */
 
     // i, k: dd(i, k) <- aa(i+-1, k+-1), jf(i, k)
-    computeSolutionDifference(aa, jf, dd);
-
-    if (file_output) {
-        gatherAndOutput("dd dd", dd);
-    }
+    gatherAndOutput("dd dd", computeSolutionDifference(aa, jf));
 
 /*
     вычисление магнитных полей

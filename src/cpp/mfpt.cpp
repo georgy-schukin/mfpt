@@ -58,7 +58,7 @@ void pr2(DArray2 &b, int l1, int m1, int l2, int m2, ofstream &out) {
     }
 }
 
-void print(DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
+void print(const DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
     out << setw(7) << "";
     for (int i = i_start; i < i_end; i++) {
         out << setw(3) << i + 1;
@@ -70,20 +70,24 @@ void print(DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstre
     for (int j = j_end - 1; j >= j_start; j--) {
         out << setw(3) << j + 1 << setw(1) << "";
         for (int i = i_start; i < i_end; i++) {
-            out << setw(9) << std::fixed << setprecision(3) << data(i, j);
+            out << setw(10) << std::fixed << setprecision(3) << data(i, j);
         }
         out << std::endl;
     }
 }
 
-void output(const string &header, DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
+void output(const string &header, const DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
     out << "\n";
     out << " " << header << "\n";
     print(data, i_start, i_end, j_start, j_end, out);
 }
 
-void output(const string &header, DArray2 &data, const std::array<int, 4> &range, ofstream &out) {
+void output(const string &header, const DArray2 &data, const std::array<int, 4> &range, ofstream &out) {
     output(header, data, range[0], range[1], range[2], range[3], out);
+}
+
+void outputFull(const string &header, const DArray2 &data, ofstream &out) {
+    output(header, data, {0, data.size(0), 0, data.size(1)}, out);
 }
 
 int main(int argc, char **argv) {
@@ -98,6 +102,7 @@ int main(int argc, char **argv) {
     const int IM_DEF = 20;
     const int KM_DEF = 60;
     const int FOUT_DEF = 1;
+    const int FULL_OUTPUT_DEF = 0;
 
     if (argc > 1) {
         const auto s = string(argv[1]);
@@ -105,7 +110,9 @@ int main(int argc, char **argv) {
             cout << argv[0] <<
                 " [im=" << IM_DEF << "]" <<
                 " [km=" << KM_DEF << "]" <<
-                " [file_output=" << FOUT_DEF << "]" << endl;
+                " [file_output=" << FOUT_DEF << "]" <<
+                " [full_output=" << FULL_OUTPUT_DEF << "]" <<
+                endl;
             return 0;
         }
     }
@@ -113,6 +120,7 @@ int main(int argc, char **argv) {
     const int im = (argc > 1) ? stoi(argv[1]) : IM_DEF;
     const int km = (argc > 2) ? stoi(argv[2]) : KM_DEF;
     const bool file_output = (argc > 3) ? stoi(argv[3]) : FOUT_DEF;
+    const bool full_output = (argc > 4) ? stoi(argv[4]) : FULL_OUTPUT_DEF;
 
 /*
     real*8 br(imp,kmp),bf(imp,kmp),bz(imp,kmp)
@@ -161,6 +169,16 @@ int main(int argc, char **argv) {
     const double hz2 = hz * hz;
 
     const std::array<int, 4> output_range = {0, 7, 0, 6};
+
+    auto doOutput = [&](const std::string &header, const DArray2 &data) {
+        if (file_output) {
+            if (full_output) {
+                outputFull(header, data, out_lst);
+            } else {
+                output(header, data, output_range, out_lst);
+            }
+        }
+    };
 
     auto ts = chrono::steady_clock::now();
 
@@ -233,10 +251,8 @@ c         s=dcos(pi*z/zm)
         }
     }
 
-    if (file_output) {
-        output("aa1 aa1", aa1, output_range, out_lst);
-        output("jf jf", jf, output_range, out_lst);
-    }
+    doOutput("aa1 aa1", aa1);
+    doOutput("jf jf", jf);
 
 /*
     вычисление разностей
@@ -266,9 +282,7 @@ c         s=dcos(pi*z/zm)
         phi1(i, km) = 0.0;
     }
 
-    if (file_output) {
-        output("gg gg", gg, output_range, out_lst);
-    }
+    doOutput("gg gg", gg);
 
 /*
     вычисление синусов
@@ -330,9 +344,7 @@ c         s=dcos(pi*z/zm)
         ff1(i, km) = 0.0;
     }
 
-    if (file_output) {
-        output("bb bb", bb, output_range, out_lst);
-    }
+    doOutput("bb bb", bb);
 
 /*
     прогонка по радиусу
@@ -379,10 +391,8 @@ c         s=dcos(pi*z/zm)
         }
     }
 
-    if (file_output) {
-        output("ff ff", ff, output_range, out_lst);
-        output("ff1 ff1", ff1, output_range, out_lst);
-    }
+    doOutput("ff ff", ff);
+    doOutput("ff1 ff1", ff1);
 
 /*
     обратное преобразование Фурье
@@ -421,10 +431,8 @@ c         s=dcos(pi*z/zm)
         phi(i, km) = 0.0;
     }
 
-    if (file_output) {
-        output("phi phi", phi, output_range, out_lst);
-        output("phi1 phi1", phi1, output_range, out_lst);
-    }
+    doOutput("phi phi", phi);
+    doOutput("phi1 phi1", phi1);
 
 /*
     proverka2 решения dd dd
@@ -438,16 +446,18 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
-    // i, k: dd(i, k) <- phi(i+-1, k+-1)
-    for (int i = 2; i < im + 1; i++) {
-        for (int k = 1; k < km; k++) {
-            dd(i, k) = compCheck(phi, gg, i, k);
+    auto compSolutionDifference = [&](const DArray2 &phi, const DArray2 &gg) -> DArray2 {
+        DArray2 diff(im + 2, km + 2);
+        for (int i = 2; i < im + 1; i++) {
+            for (int k = 1; k < km + 1; k++) {
+                diff(i, k) = std::abs(compCheck(phi, gg, i, k));
+            }
         }
-    }
+        return diff;
+    };
 
-    if (file_output) {
-        output("proverka2 dd dd", dd, output_range, out_lst);
-    }
+    // i, k: dd(i, k) <- phi(i+-1, k+-1)
+    doOutput("proverka2 dd dd", compSolutionDifference(phi, gg));
 
 /*
     решение при к=2
@@ -504,16 +514,10 @@ c         s=dcos(pi*z/zm)
         }
     }
 
-    if (file_output) {
-        output("aa aa", aa, output_range, out_lst);
-    }
+    doOutput("aa aa", aa);
 
 /*
     proverka3 решения dd dd
-
-      write(25,*)
-      write(25,*) 'aa aa'
-      call pr21(aa,1,7,1,6)
 
       do i=3,im+1
          do k=2,km+1
@@ -525,15 +529,7 @@ c         s=dcos(pi*z/zm)
 */
 
     // i, k: dd(i, k) <- aa(i+-1, k+-1), jf(i, k)
-    for (int i = 2; i < im + 1; i++) {
-        for (int k = 1; k < km + 1; k++) {
-            dd(i, k) = compCheck(aa, jf, i, k);
-        }
-    }
-
-    if (file_output) {
-        output("dd dd", dd, output_range, out_lst);
-    }
+    doOutput("dd dd", compSolutionDifference(aa, jf));
 
 /*
     вычисление магнитных полей
