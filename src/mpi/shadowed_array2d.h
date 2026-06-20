@@ -111,13 +111,17 @@ private:
     typename std::vector<T> _data;
 };
 
-template <typename T>
-void copy(const ShadowedArray2D<T> &src, ShadowedArray2D<T> &dst, size_t start_x = 0, size_t start_y = 0) {
+/*template <typename T>
+void copy(const ShadowedArray2D<T> &src, ShadowedArray2D<T> &dst,
+            size_t src_start_x = 0, size_t src_start_y = 0,
+            size_t dst_start_x = 0, size_t dst_start_y = 0) {
+    const auto start_x = std::min(src_start_x, src.size(0));
+    const auto start_y = std::min(src_start_y, src.size(1));
     const auto end_x = std::min(dst.size(0), src.size(0) + start_x);
     const auto end_y = std::min(dst.size(1), src.size(1) + start_y);
-    for (size_t i = 0; i < end_x; i++) {
-        for (size_t j = 0; j < end_y; j++) {
-            dst(i + start_x, j + start_y) = src(i, j);
+    for (size_t i = src_start_x; i < end_x; i++) {
+        for (size_t j = src_start_y; j < end_y; j++) {
+            dst(i + dst_start_x, j + dst_start_y) = src(i, j);
         }
     }
-}
+}*/
