@@ -27,6 +27,7 @@ public:
     int getBlockSize(int block_index) const;
     int getBlockShift(int block_index) const;
     int numOfBlocks() const;
+    int fullSize() const;
     int localStart(int index, int block_index) const;
     int localEnd(int index, int block_index) const;
     int toGlobal(int index, int block_index) const;

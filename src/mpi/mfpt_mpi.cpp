@@ -19,9 +19,12 @@ using namespace std;
 using DArray2 = ShadowedArray2D<double>;
 using DArray1 = std::vector<double>;
 
-const int TAG_PREV = 0;
-const int TAG_NEXT = 1;
-const int GATHER_TAG = 2;
+enum Tags: int {
+    TAG_PREV = 0,
+    TAG_NEXT = 1,
+    TAG_GATHER = 2,
+    TAG_SCATTER = 3
+};
 
 void print(const DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
     out << setw(7) << "";
@@ -65,11 +68,15 @@ MPI_Datatype makeRowType(const DArray2 &array) {
     return row_type;
 }
 
-MPI_Datatype makeDataSendType(const DArray2 &array) {
+MPI_Datatype makeDataVectorType(int num_of_blocks, int block_size, int stride) {
     MPI_Datatype send_type;
-    MPI_Type_vector(array.size(0), array.size(1), array.size(1) + 2 * array.shadowSize(1), MPI_DOUBLE, &send_type);
+    MPI_Type_vector(num_of_blocks, block_size, stride, MPI_DOUBLE, &send_type);
     MPI_Type_commit(&send_type);
     return send_type;
+}
+
+MPI_Datatype makeDataVectorType(const DArray2 &array) {
+    return makeDataVectorType(array.size(0), array.size(1), array.size(1) + 2 * array.shadowSize(1));
 }
 
 void syncKPrev(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
@@ -78,7 +85,7 @@ void syncKPrev(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
         // Send data column.
         MPI_Isend(&arr(0, 0), 1, col_type, rank - 1, TAG_PREV, MPI_COMM_WORLD, &req[0]);
         // Receive in shadow.
-        MPI_Irecv(&arr.raw(arr.shadowSize(0), size_t(0)), 1, col_type, rank - 1, TAG_PREV, MPI_COMM_WORLD, &req[1]);
+        MPI_Irecv(&arr.raw(arr.shadowSize(0), size_t(0)), 1, col_type, rank - 1, TAG_NEXT, MPI_COMM_WORLD, &req[1]);
         MPI_Waitall(2, req, MPI_STATUSES_IGNORE);
     }
 }
@@ -89,7 +96,7 @@ void syncKNext(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
         // Send data column.
         MPI_Isend(&arr(size_t(0), arr.size(1) - 1), 1, col_type, rank + 1, TAG_NEXT, MPI_COMM_WORLD, &req[0]);
         // Receive in shadow.
-        MPI_Irecv(&arr.raw(arr.shadowSize(0), arr.fullSize(1) - 1), 1, col_type, rank + 1, TAG_NEXT, MPI_COMM_WORLD, &req[1]);
+        MPI_Irecv(&arr.raw(arr.shadowSize(0), arr.fullSize(1) - 1), 1, col_type, rank + 1, TAG_PREV, MPI_COMM_WORLD, &req[1]);
         MPI_Waitall(2, req, MPI_STATUSES_IGNORE);
     }
 }
@@ -100,7 +107,7 @@ void syncIPrev(DArray2 &arr, MPI_Datatype row_type, int rank, int size) {
         // Send data column.
         MPI_Isend(&arr(0, 0), 1, row_type, rank - 1, TAG_PREV, MPI_COMM_WORLD, &req[0]);
         // Receive in shadow.
-        MPI_Irecv(&arr.raw(size_t(0), arr.shadowSize(1)), 1, row_type, rank - 1, TAG_PREV, MPI_COMM_WORLD, &req[1]);
+        MPI_Irecv(&arr.raw(size_t(0), arr.shadowSize(1)), 1, row_type, rank - 1, TAG_NEXT, MPI_COMM_WORLD, &req[1]);
         MPI_Waitall(2, req, MPI_STATUSES_IGNORE);
     }
 }
@@ -111,7 +118,7 @@ void syncINext(DArray2 &arr, MPI_Datatype row_type, int rank, int size) {
         // Send data column.
         MPI_Isend(&arr(arr.size(0) - 1, size_t(0)), 1, row_type, rank + 1, TAG_NEXT, MPI_COMM_WORLD, &req[0]);
         // Receive in shadow.
-        MPI_Irecv(&arr.raw(arr.fullSize(0) - 1, arr.shadowSize(1)), 1, row_type, rank + 1, TAG_NEXT, MPI_COMM_WORLD, &req[1]);
+        MPI_Irecv(&arr.raw(arr.fullSize(0) - 1, arr.shadowSize(1)), 1, row_type, rank + 1, TAG_PREV, MPI_COMM_WORLD, &req[1]);
         MPI_Waitall(2, req, MPI_STATUSES_IGNORE);
     }
 }
@@ -126,45 +133,54 @@ void syncI(DArray2 &arr, MPI_Datatype row_type, int rank, int size) {
     syncINext(arr, row_type, rank, size);
 }
 
-DArray2 gatherArrayK(const DArray2 &local_data, const BlockDecomposition &k_decomp, int im_size, int km_size, int rank, int size) {
+DArray2 gatherArrayK(const DArray2 &local_data, const BlockDecomposition &k_decomp, int rank, int size, int root = 0) {
     std::vector<MPI_Request> reqs;
-    if (rank == 0) {
+    if (rank == root) {
         reqs.resize(size + 1);
     } else {
         reqs.resize(1);
     }
 
-    auto send_type = makeDataSendType(local_data);
+    auto send_type = makeDataVectorType(local_data);
+    MPI_Isend(&local_data(0, 0), 1, send_type, 0, TAG_GATHER, MPI_COMM_WORLD, &reqs[0]);
+    MPI_Type_free(&send_type);
 
-    MPI_Isend(&local_data(0, 0), 1, send_type, 0, GATHER_TAG, MPI_COMM_WORLD, &reqs[0]);
-
-    if (rank == 0) {
-        std::vector<DArray2> parts;
-        for (int i = 0; i < size; i++) {
-            parts.push_back(DArray2(im_size, k_decomp.getBlockSize(i)));
-        }
-        for (int i = 0; i < size; i++) {
-            MPI_Irecv(parts[i].data(), parts[i].size(), MPI_DOUBLE, i, GATHER_TAG, MPI_COMM_WORLD, &reqs[i + 1]);
-        }
-        MPI_Waitall(reqs.size(), reqs.data(), MPI_STATUSES_IGNORE);
-
-        DArray2 arr(im_size, km_size);
+    DArray2 data;
+    if (rank == root) {
+        data == DArray2(local_data.size(0), k_decomp.fullSize());
         for (int r = 0; r < size; r++) {
-            const auto &part = parts[r];
-            const auto k_shift = k_decomp.getBlockShift(r);
-            for (int i = 0; i < (int)part.size(0); i++) {
-                for (int k = 0; k < (int)part.size(1); k++) {
-                    arr(i, k + k_shift) = part(i, k);
-                }
-            }
+            auto recv_type = makeDataVectorType(data.size(0), k_decomp.getBlockSize(r), data.size(1) + 2 * data.shadowSize(1));
+            MPI_Irecv(&data(0, k_decomp.getBlockShift(r)), 1, recv_type, r, TAG_GATHER, MPI_COMM_WORLD, &reqs[r + 1]);
+            MPI_Type_free(&recv_type);
         }
-        MPI_Type_free(&send_type);
-        return arr;
-    } else {
-        MPI_Waitall(reqs.size(), reqs.data(), MPI_STATUSES_IGNORE);
-        MPI_Type_free(&send_type);
     }
-    return DArray2();
+    MPI_Waitall(reqs.size(), reqs.data(), MPI_STATUSES_IGNORE);
+    return data;
+}
+
+DArray2 scatterArrayK(const DArray2 &data, int size_x, const BlockDecomposition &k_decomp, int shadow_x, int shadow_y, int rank, int size, int root = 0) {
+    std::vector<MPI_Request> reqs;
+    if (rank == root) {
+        reqs.resize(size + 1);
+    } else {
+        reqs.resize(1);
+    }
+
+    DArray2 local_data(size_x, k_decomp.getBlockSize(rank), shadow_x, shadow_y);
+
+    auto recv_type = makeDataVectorType(local_data);
+    MPI_Irecv(&local_data(0, 0), 1, recv_type, 0, TAG_SCATTER, MPI_COMM_WORLD, &reqs[0]);
+    MPI_Type_free(&recv_type);
+
+    if (rank == root) {
+        for (int r = 0; r < size; r++) {
+            auto send_type = makeDataVectorType(data.size(0), k_decomp.getBlockSize(r), data.size(1) + 2 * data.shadowSize(1));
+            MPI_Isend(&data(0, k_decomp.getBlockShift(r)), 1, send_type, r, TAG_SCATTER, MPI_COMM_WORLD, &reqs[r + 1]);
+            MPI_Type_free(&send_type);
+        }
+    }
+    MPI_Waitall(reqs.size(), reqs.data(), MPI_STATUSES_IGNORE);
+    return local_data;
 }
 
 DArray1 computeSins(size_t size, double coeff) {
@@ -202,8 +218,9 @@ void reduceSumOpVector(void *in, void *inout, int *len, MPI_Datatype *dtype) {
     double *invec = (double*)in;
     double *inoutvec = (double*)inout;
     for (int i = 0; i < count; i++) {
+        const auto shift = i * stride;
         for(int j = 0; j < blocklen; j++) {
-            inoutvec[i * stride + j] += invec[i * stride + j];
+            inoutvec[shift + j] += invec[shift + j];
         }
     }
 }
@@ -298,16 +315,20 @@ int main(int argc, char **argv) {
         out_lst.open("output.lst");
     }
 
+    auto outputArray = [&](const std::string &header, const DArray2 &data) {
+        if (rank == 0) {
+            if (full_output) {
+                output(header, data, {0, data.size(0), 0, data.size(1)}, out_lst);
+            } else {
+                output(header, data, output_range, out_lst);
+            }
+        }
+    };
+
     auto gatherAndOutput = [&](const std::string &header, const DArray2 &local_data) {
         if (file_output) {
-            const auto arr = gatherArrayK(local_data, kms_decomp, local_data.size(0), kms, rank, size);
-            if (rank == 0) {
-                if (full_output) {
-                    output(header, arr, {0, arr.size(0), 0, arr.size(1)}, out_lst);
-                } else {
-                    output(header, arr, output_range, out_lst);
-                }
-            }
+            const auto arr = gatherArrayK(local_data, kms_decomp, rank, size);
+            outputArray(header, arr);
         }
     };
 
@@ -340,7 +361,7 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
-    auto initSolution = [&](DArray2 &output) {
+    auto initTestSolution = [&](DArray2 &output) {
         const double a0 = -0.1;
         const double a = 1.0;
         const double d = 1.0;
@@ -356,8 +377,8 @@ c         s=dcos(pi*z/zm)
         }
     };
 
-    // k, i: aa1(i, k) <- expr
-    initSolution(aa1);
+    // k: 0..km+2, i: 1..2*im+2: aa1(i, k) <- expr
+    initTestSolution(aa1);
 
 /*
     тестовые токи
@@ -381,7 +402,7 @@ c         s=dcos(pi*z/zm)
                (phi(i, k + 1) - 2.0 * phi(i, k) + phi(i, k - 1)) / hz2;
     };
 
-    auto initCurrent = [&](DArray2 &input, DArray2 &output) {
+    auto initTestCurrent = [&](DArray2 &input, DArray2 &output) {
         syncK(input, col_type, rank, size);
         for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
             const double s = (1.5 * input(2, k) - 4.5 * input(1, k)) / hr2 +
@@ -393,8 +414,8 @@ c         s=dcos(pi*z/zm)
         }
     };
 
-    // k, i: jf(i, k) <- aa1(i+-1, k+-1)
-    initCurrent(aa1, jf);
+    // k: 1..km+1, i: 2..2*im+1: jf(i, k) <- aa1(i+-1, k+-1)
+    initTestCurrent(aa1, jf);
 
     gatherAndOutput("aa1 aa1", aa1);
     gatherAndOutput("jf jf", jf);
@@ -427,7 +448,7 @@ c         s=dcos(pi*z/zm)
     };
 
     auto computeDifference = [&](DArray2 &input, DArray2 &output) {
-        syncKNext(input, col_type, rank, size);
+        syncK(input, col_type, rank, size);
         for (int i = 1; i < 2 * im + 1; i++) {
             for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
                 output(i, k) = input(i, k + 1) - input(i, k);
@@ -437,8 +458,8 @@ c         s=dcos(pi*z/zm)
         }
     };
 
-    // i, k: gg(i, k) <- jf(i, k), jf(i, k + 1)
-    // i, k: phi1(i, k) <- aa1(i, k), aa1(i, k + 1)
+    // i: 1..2*im+1, k: 1..km: gg(i, k) <- jf(i, k), jf(i, k + 1)
+    // i: 1..2*im+1, k: 1..km: phi1(i, k) <- aa1(i, k), aa1(i, k + 1)
     computeDifference(jf, gg);
     computeDifference(aa1, phi1);
 
@@ -478,26 +499,27 @@ c         s=dcos(pi*z/zm)
       enddo    ! i
 */
 
-    auto vector_sum_op = makeVectorSumOp();
+    auto vector_sum_op = makeVectorSumOp();    
 
-    auto computeFFTAux = [&](const DArray2 &input, DArray2 &output, double coeff) {
+    auto computeFFTAux = [&](const DArray2 &input, DArray2 &output, double coeff) {        
         for (int r = 0; r < size; r++) {
-            DArray2 tmp(output.size(0), kms_decomp.getBlockSize(r), 0.0, output.shadowSize(0), output.shadowSize(1));
-            for (int i = 1; i < 2 * im + 1; i++) {
-                const auto j_start = kms_decomp.getRange(r).localStart(1);
-                const auto j_end = kms_decomp.getRange(r).localEnd(km);
+            const auto curr_range = kms_decomp.getRange(r);
+            const auto j_start = curr_range.localStart(1);
+            const auto j_end = curr_range.localEnd(km);
+            DArray2 tmp(output.size(0), curr_range.size(), 0.0, output.shadowSize(0), output.shadowSize(1));
+            for (int i = 1; i < 2 * im + 1; i++) {                
                 for (int j = j_start; j < j_end; j++) {
                     double s = 0.0;
+                    const auto jj = curr_range.toGlobal(j);
                     for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
-                        const auto kk = my_km_range.toGlobal(k);
-                        const auto jj = my_km_range.toGlobal(j);
+                        const auto kk = my_km_range.toGlobal(k);                        
                         s += input(i, k) * dsins[(kk * jj) % dsins.size()];
                     }
-                    tmp(i, j) = s * coeff;
+                    tmp(i, j) = s * coeff;                    
                 }
             }
-            auto type = makeDataSendType(tmp);
-            MPI_Reduce(tmp.data(), output.data(), 1, type, vector_sum_op, r, MPI_COMM_WORLD);
+            auto type = makeDataVectorType(tmp);
+            MPI_Reduce(&tmp(0, 0), &output(0, 0), 1, type, vector_sum_op, r, MPI_COMM_WORLD);
             MPI_Type_free(&type);
         }
     };
@@ -510,8 +532,8 @@ c         s=dcos(pi*z/zm)
         computeFFTAux(input, output, 1.0);
     };
 
-    // i, j: bb(i, j) <- k, gg(i, k)
-    // i, j: ff1(i, j) <- k, phi1(i, k)
+    // i: 1..2*im+1, j: 1..km: bb(i, j) <- k: 1..km, gg(i, k)
+    // i: 1..2*im+1, j: 1..km: ff1(i, j) <- k: 1..km, phi1(i, k)
     computeFFT(gg, bb);
     computeFFT(phi1, ff1);
 
@@ -562,9 +584,9 @@ c         s=dcos(pi*z/zm)
         }
     };
 
-    // k, i: al(i) <- al(i - 1)
-    // k, i: be(i) <- be(i - 1), bb(i, k)
-    // k, i: ff(i, k) <- al(i), be(i), ff(i + 1, k)
+    // k: 1..km, i: 2..2*im+1: al(i) <- al(i - 1)
+    // k: 1..km, i: 2..2*im+1: be(i) <- be(i - 1), bb(i, k)
+    // k: 1..km, i: 2*im..1: ff(i, k) <- al(i), be(i), ff(i + 1, k)
     // i: seq, k: par
     computeProgonka(bb, ff);
 
@@ -590,7 +612,7 @@ c         s=dcos(pi*z/zm)
       enddo     !   i
 */
 
-    // i, k: phi(i, k) <- j, ff(i, j)
+    // i: 1..2*im+1, k: 1..km: phi(i, k) <- j: 1..km, ff(i, j)
     computeFFTInverse(ff, phi);
 
     gatherAndOutput("phi phi", phi);
@@ -619,7 +641,7 @@ c         s=dcos(pi*z/zm)
         return output;
     };
 
-    // i, k: dd(i, k) <- phi(i+-1, k+-1), gg(i, k)
+    // i: 2..im+1, k: 1..km: dd(i, k) <- phi(i+-1, k+-1), gg(i, k)
     gatherAndOutput("proverka2 dd dd", computeSolutionDifference(phi, gg));
 
 /*
@@ -656,9 +678,8 @@ c         s=dcos(pi*z/zm)
         al[0] = 1.0 / 3.0;
         be[0] = (2.0 * hr2 / 9.0) * (jf(1, 1) + phi(1,1) / hz2);
 
-        // i: al(i) <- al(i - 1)
-        // i: be(i) <- be(i - 1), phi(i + 1, 1), jf(i + 1, 1)
-        // i: aa(i + 1, 1) <- al(i), be(i), aa(i + 2, 1)
+        // i: 1..2*im: al(i) <- al(i - 1)
+        // i: 1..2*im: be(i) <- be(i - 1), phi(i + 1, 1), jf(i + 1, 1)
         // i: seq
         for (int i = 1; i < 2 * im; i++) {
             double s = 2.0 * (i + 0.5) * (i + 0.5) / ((i + 1) * (i)) - al[i - 1] * (i - 0.5) / (i);
@@ -666,12 +687,14 @@ c         s=dcos(pi*z/zm)
             be[i] = (be[i - 1] * (i - 0.5) / (i) + hr2 * (jf(i + 1, 1) + phi(i + 1, 1) / hz2)) / s;
         }
 
+        // i: 2*im-1..0: aa(i + 1, 1) <- al(i), be(i), aa(i + 2, 1)
+        // i: seq
         aa(2 * im + 1, 1) = 0.0;
         for (int i = 2 * im - 1; i >= 0; i--) {
             aa(i + 1, 1) = al[i] * aa(i + 2, 1) + be[i];
         }
 
-        // i, k: aa(i, k + 1) <- aa(i, k), phi(i, k)
+        // i: 1..im+2, k: 1..km+1: aa(i, k + 1) <- aa(i, k), phi(i, k)
         // i: par, k: seq
         for (int i = 1; i < im + 2; i++) {
             aa(i, 0) = aa(i, 1);
@@ -681,9 +704,17 @@ c         s=dcos(pi*z/zm)
         }
     };
 
-    compSolution(phi, jf, aa);
+    // Temporary fix: compute solution on a root(0) node
+    auto phi_global = gatherArrayK(phi, kms_decomp, rank, size);
+    auto jf_global = gatherArrayK(jf, kms_decomp, rank, size);
+    DArray2 aa_global;
+    if (rank == 0) {
+        aa_global = DArray2(ims2, kms);
+        compSolution(phi_global, jf_global, aa_global);
+    }
+    aa = scatterArrayK(aa_global, ims2, kms_decomp, 0, 1, rank, size);
 
-    gatherAndOutput("aa aa", aa);
+    outputArray("aa aa", aa_global);
 
 /*
     proverka3 решения dd dd
@@ -697,7 +728,7 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
-    // i, k: dd(i, k) <- aa(i+-1, k+-1), jf(i, k)
+    // i: 2..im+1, k: 1..km+1: dd(i, k) <- aa(i+-1, k+-1), jf(i, k)
     gatherAndOutput("dd dd", computeSolutionDifference(aa, jf));
 
 /*
@@ -717,7 +748,7 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
-    // k, i: bz(i, k) <- aa(i, k), aa(i + 1, k)
+    // k: 0..km+2, i: 1..im+2: bz(i, k) <- aa(i, k), aa(i + 1, k)
     // i: par, k: par
     for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 2); k++) {
         bz(0, k) = 4.0 * aa(1, k) / hr;
@@ -726,9 +757,9 @@ c         s=dcos(pi*z/zm)
         }
     }
 
-    // k, i: br(i, k) <- aa(i, k), aa(i, k + 1)
+    // k: 0..km+1, i: 0..im+2: br(i, k) <- aa(i, k), aa(i, k + 1)
     // i: par, k: par
-    syncKNext(aa, col_type, rank, size);
+    syncK(aa, col_type, rank, size);
     for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 1); k++) {
         for (int i = 0; i < im + 2; i++) {
             br(i, k) = -(aa(i, k + 1) - aa(i, k)) / hz;

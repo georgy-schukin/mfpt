@@ -56,6 +56,10 @@ int BlockDecomposition::numOfBlocks() const {
     return sizes.size();
 }
 
+int BlockDecomposition::fullSize() const {
+    return shifts.back();
+}
+
 int BlockDecomposition::localStart(int index, int block_index) const {
     return (block_index == 0 ? index : 0);
 }
