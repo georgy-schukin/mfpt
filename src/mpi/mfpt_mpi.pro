@@ -11,8 +11,13 @@ TARGET = mfpt
 
 SOURCES +=   \
     block_decomp.cpp \
-    mfpt_mpi.cpp
+    comm_util.cpp \
+    mfpt_mpi.cpp \
+    output.cpp
 
 HEADERS +=   \
     block_decomp.h \
+    comm_util.h \
+    common.h \
+    output.h \
     shadowed_array2d.h

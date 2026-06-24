@@ -1,187 +1,16 @@
-#include "shadowed_array2d.h"
+#include "common.h"
 #include "block_decomp.h"
+#include "comm_util.h"
+#include "output.h"
 
 #include <mpi.h>
 
-#include <vector>
-#include <array>
-#include <iostream>
-#include <iomanip>
-#include <fstream>
 #include <cmath>
 #include <string>
 #include <chrono>
 #include <functional>
-#include <exception>
 
 using namespace std;
-
-using DArray2 = ShadowedArray2D<double>;
-using DArray1 = std::vector<double>;
-
-enum Tags: int {
-    TAG_PREV = 0,
-    TAG_NEXT = 1,
-    TAG_GATHER = 2,
-    TAG_SCATTER = 3
-};
-
-void print(const DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
-    out << setw(7) << "";
-    for (int i = i_start; i < i_end; i++) {
-        out << setw(3) << i + 1;
-        if (i < i_end - 1) {
-            out << setw(6) << "";
-        }
-    }
-    out << std::endl;
-    for (int j = j_end - 1; j >= j_start; j--) {
-        out << setw(3) << j + 1 << setw(1) << "";
-        for (int i = i_start; i < i_end; i++) {
-            out << setw(10) << std::fixed << setprecision(3) << data(i, j);
-        }
-        out << std::endl;
-    }
-}
-
-void output(const string &header, const DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
-    out << "\n";
-    out << " " << header << "\n";
-    print(data, i_start, i_end, j_start, j_end, out);
-}
-
-void output(const string &header, const DArray2 &data, const std::array<int, 4> &range, ofstream &out) {
-    output(header, data, range[0], range[1], range[2], range[3], out);
-}
-
-MPI_Datatype makeColType(const DArray2 &array) {
-    MPI_Datatype col_type;
-    MPI_Type_vector(array.size(0), 1, array.fullSize(1), MPI_DOUBLE, &col_type);
-    MPI_Type_commit(&col_type);
-    return col_type;
-}
-
-MPI_Datatype makeRowType(const DArray2 &array) {
-    MPI_Datatype row_type;
-    MPI_Type_contiguous(array.size(1), MPI_DOUBLE, &row_type);
-    MPI_Type_commit(&row_type);
-    return row_type;
-}
-
-MPI_Datatype makeDataVectorType(int num_of_blocks, int block_size, int stride) {
-    MPI_Datatype send_type;
-    MPI_Type_vector(num_of_blocks, block_size, stride, MPI_DOUBLE, &send_type);
-    MPI_Type_commit(&send_type);
-    return send_type;
-}
-
-MPI_Datatype makeDataVectorType(const DArray2 &array) {
-    return makeDataVectorType(array.size(0), array.size(1), array.size(1) + 2 * array.shadowSize(1));
-}
-
-void syncKPrev(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
-    if (rank > 0) {
-        MPI_Request req[2];
-        // Send data column.
-        MPI_Isend(&arr(0, 0), 1, col_type, rank - 1, TAG_PREV, MPI_COMM_WORLD, &req[0]);
-        // Receive in shadow.
-        MPI_Irecv(&arr.raw(arr.shadowSize(0), size_t(0)), 1, col_type, rank - 1, TAG_NEXT, MPI_COMM_WORLD, &req[1]);
-        MPI_Waitall(2, req, MPI_STATUSES_IGNORE);
-    }
-}
-
-void syncKNext(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
-    if (rank < size - 1) {
-        MPI_Request req[2];
-        // Send data column.
-        MPI_Isend(&arr(size_t(0), arr.size(1) - 1), 1, col_type, rank + 1, TAG_NEXT, MPI_COMM_WORLD, &req[0]);
-        // Receive in shadow.
-        MPI_Irecv(&arr.raw(arr.shadowSize(0), arr.fullSize(1) - 1), 1, col_type, rank + 1, TAG_PREV, MPI_COMM_WORLD, &req[1]);
-        MPI_Waitall(2, req, MPI_STATUSES_IGNORE);
-    }
-}
-
-void syncIPrev(DArray2 &arr, MPI_Datatype row_type, int rank, int size) {
-    if (rank > 0) {
-        MPI_Request req[2];
-        // Send data column.
-        MPI_Isend(&arr(0, 0), 1, row_type, rank - 1, TAG_PREV, MPI_COMM_WORLD, &req[0]);
-        // Receive in shadow.
-        MPI_Irecv(&arr.raw(size_t(0), arr.shadowSize(1)), 1, row_type, rank - 1, TAG_NEXT, MPI_COMM_WORLD, &req[1]);
-        MPI_Waitall(2, req, MPI_STATUSES_IGNORE);
-    }
-}
-
-void syncINext(DArray2 &arr, MPI_Datatype row_type, int rank, int size) {
-    if (rank < size - 1) {
-        MPI_Request req[2];
-        // Send data column.
-        MPI_Isend(&arr(arr.size(0) - 1, size_t(0)), 1, row_type, rank + 1, TAG_NEXT, MPI_COMM_WORLD, &req[0]);
-        // Receive in shadow.
-        MPI_Irecv(&arr.raw(arr.fullSize(0) - 1, arr.shadowSize(1)), 1, row_type, rank + 1, TAG_PREV, MPI_COMM_WORLD, &req[1]);
-        MPI_Waitall(2, req, MPI_STATUSES_IGNORE);
-    }
-}
-
-void syncK(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
-    syncKPrev(arr, col_type, rank, size);
-    syncKNext(arr, col_type, rank, size);
-}
-
-void syncI(DArray2 &arr, MPI_Datatype row_type, int rank, int size) {
-    syncIPrev(arr, row_type, rank, size);
-    syncINext(arr, row_type, rank, size);
-}
-
-DArray2 gatherArrayK(const DArray2 &local_data, const BlockDecomposition &k_decomp, int rank, int size, int root = 0) {
-    std::vector<MPI_Request> reqs;
-    if (rank == root) {
-        reqs.resize(size + 1);
-    } else {
-        reqs.resize(1);
-    }
-
-    auto send_type = makeDataVectorType(local_data);
-    MPI_Isend(&local_data(0, 0), 1, send_type, 0, TAG_GATHER, MPI_COMM_WORLD, &reqs[0]);
-    MPI_Type_free(&send_type);
-
-    DArray2 data;
-    if (rank == root) {
-        data == DArray2(local_data.size(0), k_decomp.fullSize());
-        for (int r = 0; r < size; r++) {
-            auto recv_type = makeDataVectorType(data.size(0), k_decomp.getBlockSize(r), data.size(1) + 2 * data.shadowSize(1));
-            MPI_Irecv(&data(0, k_decomp.getBlockShift(r)), 1, recv_type, r, TAG_GATHER, MPI_COMM_WORLD, &reqs[r + 1]);
-            MPI_Type_free(&recv_type);
-        }
-    }
-    MPI_Waitall(reqs.size(), reqs.data(), MPI_STATUSES_IGNORE);
-    return data;
-}
-
-DArray2 scatterArrayK(const DArray2 &data, int size_x, const BlockDecomposition &k_decomp, int shadow_x, int shadow_y, int rank, int size, int root = 0) {
-    std::vector<MPI_Request> reqs;
-    if (rank == root) {
-        reqs.resize(size + 1);
-    } else {
-        reqs.resize(1);
-    }
-
-    DArray2 local_data(size_x, k_decomp.getBlockSize(rank), shadow_x, shadow_y);
-
-    auto recv_type = makeDataVectorType(local_data);
-    MPI_Irecv(&local_data(0, 0), 1, recv_type, 0, TAG_SCATTER, MPI_COMM_WORLD, &reqs[0]);
-    MPI_Type_free(&recv_type);
-
-    if (rank == root) {
-        for (int r = 0; r < size; r++) {
-            auto send_type = makeDataVectorType(data.size(0), k_decomp.getBlockSize(r), data.size(1) + 2 * data.shadowSize(1));
-            MPI_Isend(&data(0, k_decomp.getBlockShift(r)), 1, send_type, r, TAG_SCATTER, MPI_COMM_WORLD, &reqs[r + 1]);
-            MPI_Type_free(&send_type);
-        }
-    }
-    MPI_Waitall(reqs.size(), reqs.data(), MPI_STATUSES_IGNORE);
-    return local_data;
-}
 
 DArray1 computeSins(size_t size, double coeff) {
     DArray1 dsins(size);
@@ -189,46 +18,6 @@ DArray1 computeSins(size_t size, double coeff) {
         dsins[k] = sin(coeff * k);
     }
     return dsins;
-}
-
-void reduceSumOpVector(void *in, void *inout, int *len, MPI_Datatype *dtype) {
-    if (*len != 1) {
-        throw std::runtime_error("Not implemented for len != 1");
-    }
-
-    int nints, naddresses, ntypes, combiner;
-    MPI_Type_get_envelope(*dtype, &nints, &naddresses, &ntypes, &combiner);
-    if (combiner != MPI_COMBINER_VECTOR) {
-        throw std::runtime_error("Non-vector datatype");
-    }
-
-    int vecargs [nints];
-    MPI_Aint vecaddrs[naddresses];
-    MPI_Datatype vectypes[ntypes];
-    MPI_Type_get_contents(*dtype, nints, naddresses, ntypes, vecargs, vecaddrs, vectypes);
-
-    if (vectypes[0] != MPI_DOUBLE) {
-        throw std::runtime_error("Not a vector of doubles");
-    }
-
-    int count = vecargs[0];
-    int blocklen = vecargs[1];
-    int stride = vecargs[2];
-
-    double *invec = (double*)in;
-    double *inoutvec = (double*)inout;
-    for (int i = 0; i < count; i++) {
-        const auto shift = i * stride;
-        for(int j = 0; j < blocklen; j++) {
-            inoutvec[shift + j] += invec[shift + j];
-        }
-    }
-}
-
-MPI_Op makeVectorSumOp() {
-    MPI_Op op;
-    MPI_Op_create(&reduceSumOpVector, 1, &op);
-    return op;
 }
 
 int main(int argc, char **argv) {
@@ -318,7 +107,7 @@ int main(int argc, char **argv) {
     auto outputArray = [&](const std::string &header, const DArray2 &data) {
         if (rank == 0) {
             if (full_output) {
-                output(header, data, {0, data.size(0), 0, data.size(1)}, out_lst);
+                output(header, data, {0, (int)data.size(0), 0, (int)data.size(1)}, out_lst);
             } else {
                 output(header, data, output_range, out_lst);
             }
@@ -403,7 +192,7 @@ c         s=dcos(pi*z/zm)
     };
 
     auto initTestCurrent = [&](DArray2 &input, DArray2 &output) {
-        syncK(input, col_type, rank, size);
+        syncShadowsK(input, col_type, rank, size);
         for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
             const double s = (1.5 * input(2, k) - 4.5 * input(1, k)) / hr2 +
                              (input(1, k + 1) - 2.0 * input(1, k) + input(1, k - 1)) / hz2;
@@ -440,15 +229,9 @@ c         s=dcos(pi*z/zm)
             arr(i, my_km_range.toLocal(k)) = value;
         }
     };
-    auto doOnK = [&my_km_range](int k, std::function<void(int)> f) {
-        if (my_km_range.hasIndex(k)) {
-            const auto kk = my_km_range.toLocal(k);
-            f(kk);
-        }
-    };
 
     auto computeDifference = [&](DArray2 &input, DArray2 &output) {
-        syncK(input, col_type, rank, size);
+        syncShadowsK(input, col_type, rank, size);
         for (int i = 1; i < 2 * im + 1; i++) {
             for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
                 output(i, k) = input(i, k + 1) - input(i, k);
@@ -631,7 +414,7 @@ c         s=dcos(pi*z/zm)
 */
 
     auto computeSolutionDifference = [&](DArray2 &first, const DArray2 &second) -> DArray2 {
-        syncK(first, col_type, rank, size);
+        syncShadowsK(first, col_type, rank, size);
         DArray2 output(im + 2, my_km_range.size());
         for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
             for (int i = 2; i < im + 1; i++) {
@@ -747,24 +530,26 @@ c         s=dcos(pi*z/zm)
          enddo
       enddo
 */
+    auto computeMagnetics = [&](DArray2 &input, DArray2 &bz, DArray2 &br) {
+        for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 2); k++) {
+            bz(0, k) = 4.0 * input(1, k) / hr;
+            for (int i = 1; i < im + 2; i++) {
+                bz(i, k) = ((i + 0.5) * input(i + 1, k) - (i - 0.5) * input(i, k)) / (hr * (i));
+            }
+        }
+
+        syncShadowsK(input, col_type, rank, size);
+        for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 1); k++) {
+            for (int i = 0; i < im + 2; i++) {
+                br(i, k) = -(input(i, k + 1) - input(i, k)) / hz;
+            }
+        }
+    };
 
     // k: 0..km+2, i: 1..im+2: bz(i, k) <- aa(i, k), aa(i + 1, k)
-    // i: par, k: par
-    for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 2); k++) {
-        bz(0, k) = 4.0 * aa(1, k) / hr;
-        for (int i = 1; i < im + 2; i++) {
-            bz(i, k) = ((i + 0.5) * aa(i + 1, k) - (i - 0.5) * aa(i, k)) / (hr * (i));
-        }
-    }
-
     // k: 0..km+1, i: 0..im+2: br(i, k) <- aa(i, k), aa(i, k + 1)
     // i: par, k: par
-    syncK(aa, col_type, rank, size);
-    for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 1); k++) {
-        for (int i = 0; i < im + 2; i++) {
-            br(i, k) = -(aa(i, k + 1) - aa(i, k)) / hz;
-        }
-    }
+    computeMagnetics(aa, bz, br);
 
     if (file_output && rank == 0) {
         out_lst.close();
