@@ -86,7 +86,7 @@ int main(int argc, char **argv) {
     // 1d decomposition by k.
     BlockDecomposition kms_decomp(kms, size);
     const size_t km_bsize = kms_decomp.getBlockSize(rank);
-    const auto my_km_range = kms_decomp.getRange(rank);    
+    const auto my_km_range = kms_decomp.getRange(rank);
 
     DArray2 br(ims, km_bsize), bf(ims, km_bsize), bz(ims, km_bsize);
     //DArray1 sb(ims2), jb(ims2), al(ims2), be(ims2);
@@ -282,23 +282,23 @@ c         s=dcos(pi*z/zm)
       enddo    ! i
 */
 
-    auto vector_sum_op = makeVectorSumOp();    
+    auto vector_sum_op = makeVectorSumOp();
 
-    auto computeFFTAux = [&](const DArray2 &input, DArray2 &output, double coeff) {        
+    auto computeFFTAux = [&](const DArray2 &input, DArray2 &output, double coeff) {
         for (int r = 0; r < size; r++) {
             const auto curr_range = kms_decomp.getRange(r);
             const auto j_start = curr_range.localStart(1);
             const auto j_end = curr_range.localEnd(km);
             DArray2 tmp(output.size(0), curr_range.size(), 0.0, output.shadowSize(0), output.shadowSize(1));
-            for (int i = 1; i < 2 * im + 1; i++) {                
+            for (int i = 1; i < 2 * im + 1; i++) {
                 for (int j = j_start; j < j_end; j++) {
                     double s = 0.0;
                     const auto jj = curr_range.toGlobal(j);
                     for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
-                        const auto kk = my_km_range.toGlobal(k);                        
+                        const auto kk = my_km_range.toGlobal(k);
                         s += input(i, k) * dsins[(kk * jj) % dsins.size()];
                     }
-                    tmp(i, j) = s * coeff;                    
+                    tmp(i, j) = s * coeff;
                 }
             }
             auto type = makeDataVectorType(tmp);
@@ -556,8 +556,14 @@ c         s=dcos(pi*z/zm)
     }
 
     auto te = chrono::steady_clock::now();
-    auto time = chrono::duration<double>(te - ts).count();
-    cout << rank << ": Time: " << time << endl;
+    auto work_time = chrono::duration<double>(te - ts).count();
+    cout << rank << ": Work time: " << work_time << endl;
+
+    double time = 0;
+    MPI_Reduce(&work_time, &time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+    if (rank == 0) {
+        cout << "TIME: " << time << endl;
+    }
 
     MPI_Finalize();
 
