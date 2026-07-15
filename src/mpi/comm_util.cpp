@@ -1,6 +1,7 @@
 #include "comm_util.h"
 
 #include <exception>
+#include <stdexcept>
 
 namespace {
 
