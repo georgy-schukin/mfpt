@@ -7,7 +7,7 @@ QMAKE_CXX = mpicxx
 QMAKE_CC = mpicc
 QMAKE_LINK = mpicxx
 
-TARGET = mfpt
+TARGET = mfpt_mpi
 
 SOURCES +=   \
     block_decomp.cpp \

@@ -538,7 +538,7 @@ c         s=dcos(pi*z/zm)
             }
         }
 
-        syncShadowsK(input, col_type, rank, size);
+        syncShadowsKNext(input, col_type, rank, size);
         for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 1); k++) {
             for (int i = 0; i < im + 2; i++) {
                 br(i, k) = -(input(i, k + 1) - input(i, k)) / hz;

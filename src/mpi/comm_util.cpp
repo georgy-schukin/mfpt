@@ -39,46 +39,74 @@ MPI_Datatype makeDataVectorType(const DArray2 &array) {
 }
 
 void syncShadowsKPrev(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
+    MPI_Request r1, r2;
     if (rank > 0) {
-        MPI_Request req[2];
-        // Send data column.
-        MPI_Isend(&arr(0, 0), 1, col_type, rank - 1, TAG_PREV, MPI_COMM_WORLD, &req[0]);
-        // Receive in shadow.
-        MPI_Irecv(&arr.raw(arr.shadowSize(0), size_t(0)), 1, col_type, rank - 1, TAG_NEXT, MPI_COMM_WORLD, &req[1]);
-        MPI_Waitall(2, req, MPI_STATUSES_IGNORE);
+        // Recv in shadow from prev.
+        MPI_Irecv(&arr.raw(arr.shadowSize(0), size_t(0)), 1, col_type, rank - 1, TAG_PREV, MPI_COMM_WORLD, &r1);
+    }
+    if (rank < size - 1) {
+        // Send data column to next.
+        MPI_Isend(&arr(size_t(0), arr.size(1) - 1), 1, col_type, rank + 1, TAG_PREV, MPI_COMM_WORLD, &r2);
+    }
+    if (rank > 0) {
+        MPI_Wait(&r1, MPI_STATUS_IGNORE);
+    }
+    if (rank < size - 1) {
+        MPI_Wait(&r2, MPI_STATUS_IGNORE);
     }
 }
 
 void syncShadowsKNext(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
+    MPI_Request r1, r2;
     if (rank < size - 1) {
-        MPI_Request req[2];
-        // Send data column.
-        MPI_Isend(&arr(size_t(0), arr.size(1) - 1), 1, col_type, rank + 1, TAG_NEXT, MPI_COMM_WORLD, &req[0]);
-        // Receive in shadow.
-        MPI_Irecv(&arr.raw(arr.shadowSize(0), arr.fullSize(1) - 1), 1, col_type, rank + 1, TAG_PREV, MPI_COMM_WORLD, &req[1]);
-        MPI_Waitall(2, req, MPI_STATUSES_IGNORE);
+        // Recv in shadow from next.
+        MPI_Irecv(&arr.raw(arr.shadowSize(0), arr.fullSize(1) - 1), 1, col_type, rank + 1, TAG_NEXT, MPI_COMM_WORLD, &r1);
+    }
+    if (rank > 0) {
+        // Send data column to prev.
+        MPI_Isend(&arr(0, 0), 1, col_type, rank - 1, TAG_NEXT, MPI_COMM_WORLD, &r2);
+    }
+    if (rank < size - 1) {
+        MPI_Wait(&r1, MPI_STATUS_IGNORE);
+    }
+    if (rank > 0) {
+        MPI_Wait(&r2, MPI_STATUS_IGNORE);
     }
 }
 
 void syncShadowsIPrev(DArray2 &arr, MPI_Datatype row_type, int rank, int size) {
+    MPI_Request r1, r2;
     if (rank > 0) {
-        MPI_Request req[2];
-        // Send data column.
-        MPI_Isend(&arr(0, 0), 1, row_type, rank - 1, TAG_PREV, MPI_COMM_WORLD, &req[0]);
-        // Receive in shadow.
-        MPI_Irecv(&arr.raw(size_t(0), arr.shadowSize(1)), 1, row_type, rank - 1, TAG_NEXT, MPI_COMM_WORLD, &req[1]);
-        MPI_Waitall(2, req, MPI_STATUSES_IGNORE);
+        // Recv in shadow from prev.
+        MPI_Irecv(&arr.raw(size_t(0), arr.shadowSize(1)), 1, row_type, rank - 1, TAG_PREV, MPI_COMM_WORLD, &r1);
+    }
+    if (rank < size - 1) {
+        // Send data row to next.
+        MPI_Isend(&arr(arr.size(0) - 1, size_t(0)), 1, row_type, rank + 1, TAG_PREV, MPI_COMM_WORLD, &r2);
+    }
+    if (rank > 0) {
+        MPI_Wait(&r1, MPI_STATUS_IGNORE);
+    }
+    if (rank < size - 1) {
+        MPI_Wait(&r2, MPI_STATUS_IGNORE);
     }
 }
 
 void syncShadowsINext(DArray2 &arr, MPI_Datatype row_type, int rank, int size) {
+    MPI_Request r1, r2;
     if (rank < size - 1) {
-        MPI_Request req[2];
-        // Send data column.
-        MPI_Isend(&arr(arr.size(0) - 1, size_t(0)), 1, row_type, rank + 1, TAG_NEXT, MPI_COMM_WORLD, &req[0]);
-        // Receive in shadow.
-        MPI_Irecv(&arr.raw(arr.fullSize(0) - 1, arr.shadowSize(1)), 1, row_type, rank + 1, TAG_PREV, MPI_COMM_WORLD, &req[1]);
-        MPI_Waitall(2, req, MPI_STATUSES_IGNORE);
+        // Recv in shadow from next.
+        MPI_Irecv(&arr.raw(arr.fullSize(0) - 1, arr.shadowSize(1)), 1, row_type, rank + 1, TAG_NEXT, MPI_COMM_WORLD, &r1);
+    }
+    if (rank > 0) {
+        // Send data row to prev.
+        MPI_Isend(&arr(0, 0), 1, row_type, rank - 1, TAG_NEXT, MPI_COMM_WORLD, &r2);
+    }
+    if (rank < size - 1) {
+        MPI_Wait(&r1, MPI_STATUS_IGNORE);
+    }
+    if (rank > 0) {
+        MPI_Wait(&r2, MPI_STATUS_IGNORE);
     }
 }
 
