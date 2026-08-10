@@ -9,6 +9,7 @@
 #include <string>
 #include <chrono>
 #include <functional>
+#include <sstream>
 
 using namespace std;
 
@@ -557,13 +558,20 @@ c         s=dcos(pi*z/zm)
 
     auto te = chrono::steady_clock::now();
     auto work_time = chrono::duration<double>(te - ts).count();
-    cout << rank << ": Work time: " << work_time << endl;
 
     double time = 0;
     MPI_Reduce(&work_time, &time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+
+    std::ostringstream out;
+
     if (rank == 0) {
-        cout << "TIME: " << time << endl;
+        out << "Im: " << im << ", Km: " << km << ", Nodes: " << size << endl;
+        out << "TIME: " << time << endl;
     }
+
+    out << rank << ": Work time: " << work_time << endl;
+
+    std::cout << out.str();
 
     MPI_Finalize();
 
