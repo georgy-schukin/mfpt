@@ -2,6 +2,7 @@
 #include "block_decomp.h"
 #include "comm_util.h"
 #include "output.h"
+#include "timer.h"
 
 #include <mpi.h>
 
@@ -131,7 +132,10 @@ int main(int argc, char **argv) {
     const double hr2 = hr * hr;
     const double hz2 = hz * hz;
 
-    auto ts = chrono::steady_clock::now();
+    Timer work_timer;
+    double comp_time = 0;
+    double shadow_time = 0;
+    double reduce_time = 0;
 
 /*
     тестовое решение
@@ -152,6 +156,7 @@ c         s=dcos(pi*z/zm)
 */
 
     auto initTestSolution = [&](DArray2 &output) {
+        Timer tm;
         const double a0 = -0.1;
         const double a = 1.0;
         const double d = 1.0;
@@ -165,6 +170,7 @@ c         s=dcos(pi*z/zm)
             }
             output(0, k) = -output(1, k);
         }
+        comp_time += tm.time();
     };
 
     // k: 0..km+2, i: 1..2*im+2: aa1(i, k) <- expr
@@ -193,7 +199,10 @@ c         s=dcos(pi*z/zm)
     };
 
     auto initTestCurrent = [&](DArray2 &input, DArray2 &output) {
+        Timer tm;
         syncShadowsK(input, col_type, rank, size);
+        shadow_time += tm.time();
+        tm.reset();
         for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
             const double s = (1.5 * input(2, k) - 4.5 * input(1, k)) / hr2 +
                              (input(1, k + 1) - 2.0 * input(1, k) + input(1, k - 1)) / hz2;
@@ -202,6 +211,7 @@ c         s=dcos(pi*z/zm)
                 output(i, k) = -getSolution(input, i, k);
             }
         }
+        comp_time += tm.time();
     };
 
     // k: 1..km+1, i: 2..2*im+1: jf(i, k) <- aa1(i+-1, k+-1)
@@ -232,7 +242,10 @@ c         s=dcos(pi*z/zm)
     };
 
     auto computeDifference = [&](DArray2 &input, DArray2 &output) {
+        Timer tm;
         syncShadowsK(input, col_type, rank, size);
+        shadow_time += tm.time();
+        tm.reset();
         for (int i = 1; i < 2 * im + 1; i++) {
             for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
                 output(i, k) = input(i, k + 1) - input(i, k);
@@ -240,6 +253,7 @@ c         s=dcos(pi*z/zm)
             setOnK(output, i, 0, 0.0);
             setOnK(output, i, km, 0.0);
         }
+        comp_time += tm.time();
     };
 
     // i: 1..2*im+1, k: 1..km: gg(i, k) <- jf(i, k), jf(i, k + 1)
@@ -287,6 +301,7 @@ c         s=dcos(pi*z/zm)
 
     auto computeFFTAux = [&](const DArray2 &input, DArray2 &output, double coeff) {
         for (int r = 0; r < size; r++) {
+            Timer tm;
             const auto curr_range = kms_decomp.getRange(r);
             const auto j_start = curr_range.localStart(1);
             const auto j_end = curr_range.localEnd(km);
@@ -302,8 +317,11 @@ c         s=dcos(pi*z/zm)
                     tmp(i, j) = s * coeff;
                 }
             }
+            comp_time += tm.time();
             auto type = makeDataVectorType(tmp);
+            tm.reset();
             MPI_Reduce(&tmp(0, 0), &output(0, 0), 1, type, vector_sum_op, r, MPI_COMM_WORLD);
+            reduce_time += tm.time();
             MPI_Type_free(&type);
         }
     };
@@ -347,6 +365,7 @@ c         s=dcos(pi*z/zm)
 */
 
     auto computeProgonka = [&](const DArray2 &input, DArray2 &output) {
+        Timer tm;
         DArray1 al(ims2), be(ims2);
         for (int k = my_km_range.localEnd(1); k < my_km_range.localEnd(km); k++) {
             const auto kk = my_km_range.toGlobal(k);
@@ -366,6 +385,7 @@ c         s=dcos(pi*z/zm)
                 output(i, k) = al[i] * output(i + 1, k) + be[i];
             }
         }
+        comp_time += tm.time();
     };
 
     // k: 1..km, i: 2..2*im+1: al(i) <- al(i - 1)
@@ -415,13 +435,17 @@ c         s=dcos(pi*z/zm)
 */
 
     auto computeSolutionDifference = [&](DArray2 &first, const DArray2 &second) -> DArray2 {
+        Timer tm;
         syncShadowsK(first, col_type, rank, size);
+        shadow_time += tm.time();
+        tm.reset();
         DArray2 output(im + 2, my_km_range.size());
         for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
             for (int i = 2; i < im + 1; i++) {
                 output(i, k) = std::abs(getSolution(first, i, k) + second(i, k));
             }
         }
+        comp_time += tm.time();
         return output;
     };
 
@@ -458,6 +482,7 @@ c         s=dcos(pi*z/zm)
 
     // TODO: parallelize
     auto compSolution = [&](const DArray2 &phi, const DArray2 &jf, DArray2 &aa) {
+        Timer tm;
         DArray1 al(ims2), be(ims2);
         al[0] = 1.0 / 3.0;
         be[0] = (2.0 * hr2 / 9.0) * (jf(1, 1) + phi(1,1) / hz2);
@@ -486,6 +511,7 @@ c         s=dcos(pi*z/zm)
                 aa(i, k + 1) = aa(i, k) + phi(i, k);
             }
         }
+        comp_time += tm.time();
     };
 
     // Temporary fix: compute solution on a root(0) node
@@ -532,19 +558,25 @@ c         s=dcos(pi*z/zm)
       enddo
 */
     auto computeMagnetics = [&](DArray2 &input, DArray2 &bz, DArray2 &br) {
+        Timer tm;
         for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 2); k++) {
             bz(0, k) = 4.0 * input(1, k) / hr;
             for (int i = 1; i < im + 2; i++) {
                 bz(i, k) = ((i + 0.5) * input(i + 1, k) - (i - 0.5) * input(i, k)) / (hr * (i));
             }
         }
+        comp_time += tm.time();
 
+        tm.reset();
         syncShadowsKNext(input, col_type, rank, size);
+        shadow_time += tm.time();
+        tm.reset();
         for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 1); k++) {
             for (int i = 0; i < im + 2; i++) {
                 br(i, k) = -(input(i, k + 1) - input(i, k)) / hz;
             }
         }
+        comp_time += tm.time();
     };
 
     // k: 0..km+2, i: 1..im+2: bz(i, k) <- aa(i, k), aa(i + 1, k)
@@ -556,8 +588,7 @@ c         s=dcos(pi*z/zm)
         out_lst.close();
     }
 
-    auto te = chrono::steady_clock::now();
-    auto work_time = chrono::duration<double>(te - ts).count();
+    auto work_time = work_timer.time();
 
     double time = 0;
     MPI_Reduce(&work_time, &time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
@@ -569,7 +600,10 @@ c         s=dcos(pi*z/zm)
         out << "TIME: " << time << endl;
     }
 
-    out << rank << ": Work time: " << work_time << endl;
+    out << rank << ": Work time: " << work_time <<
+        ", Comp time: " << comp_time <<
+        ", Shadow time: " << shadow_time <<
+        ", Reduce time: " << reduce_time << endl;
 
     std::cout << out.str();
 

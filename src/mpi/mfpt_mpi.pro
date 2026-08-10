@@ -20,4 +20,5 @@ HEADERS +=   \
     comm_util.h \
     common.h \
     output.h \
-    shadowed_array2d.h
+    shadowed_array2d.h \
+    timer.h
