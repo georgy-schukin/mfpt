@@ -15,6 +15,7 @@ SOURCES +=   \
 
 HEADERS +=   \
     common.h \
+    distributed_mesh2d.h \
     output.h \
     shadowed_array2d.h
 

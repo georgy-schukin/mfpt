@@ -1,5 +1,7 @@
 #pragma once
 
+#include "didal/base/array_nd.h"
+
 #include <vector>
 #include <array>
 #include <cstddef>
@@ -12,44 +14,28 @@ public:
     ShadowedArray2D(size_t sx, size_t sy, size_t shadow_sx = 0, size_t shadow_sy = 0) :
         _size {sx, sy},
         _shadow_size {shadow_sx, shadow_sy},
-        _data((sx + 2 * shadow_sx) * (sy + 2 * shadow_sy), T {}) {
+        _data({sx + 2 * shadow_sx, sy + 2 * shadow_sy}, T {}) {
     }
     ShadowedArray2D(size_t sx, size_t sy, const T &value, size_t shadow_sx, size_t shadow_sy) :
         _size {sx, sy},
         _shadow_size {shadow_sx, shadow_sy},
-        _data((sx + 2 * shadow_sx) * (sy + 2 * shadow_sy), value) {
+        _data({sx + 2 * shadow_sx, sy + 2 * shadow_sy}, value) {
     }
     ShadowedArray2D(const std::array<size_t, 2> &sz, const std::array<size_t, 2> &shadow_sz = {0, 0}) :
         _size(sz),
         _shadow_size(shadow_sz),
-        _data((sz[0] + 2 * shadow_sz[0]) * (sz[1] + 2 * shadow_sz[1]), T {}) {
+        _data({sz[0] + 2 * shadow_sz[0], sz[1] + 2 * shadow_sz[1]}, T {}) {
     }
 
-    ShadowedArray2D& operator==(const ShadowedArray2D &arr) {
-        _size = arr._size;
-        _shadow_size = arr._shadow_size;
-        _data = arr._data;
-        return *this;
-    }
-    ShadowedArray2D& operator==(ShadowedArray2D &&arr) {
-        _size = std::move(arr._size);
-        _shadow_size = std::move(arr._shadow_size);
-        _data = std::move(arr._data);
-        return *this;
-    }
-
-    void populate(const T* raw_data, size_t data_sz) {
-        for (size_t i = 0; i < data_sz; i++) {
-            _data[i] = raw_data[i];
-        }
-    }
+    ShadowedArray2D& operator==(const ShadowedArray2D &arr) = default;
+    ShadowedArray2D& operator==(ShadowedArray2D &&arr) = default;
 
     T* data() {
-        return _data.data();
+        return _data.data().data();
     }
 
     const T* data() const {
-        return _data.data();
+        return _data.data().data();
     }
 
     size_t size(size_t dim) const {
@@ -61,7 +47,7 @@ public:
     }
 
     size_t fullSize(size_t dim) const {
-        return _size[dim] + 2 * _shadow_size[dim];
+        return _data.size(dim);
     }
 
     size_t size() const {
@@ -70,7 +56,7 @@ public:
 
     template <typename Index>
     size_t at(Index x, Index y) const {
-        return (x + _shadow_size[0]) * fullSize(1) + y + _shadow_size[1];
+        return _data.toLinearIndex(x + _shadow_size[0], y + _shadow_size[1]);
     }
 
     bool isRowMajorOrder() const {
@@ -79,7 +65,7 @@ public:
 
     template <typename Index>
     size_t atRaw(Index x, Index y) const {
-        return x * fullSize(1) + y;
+        return _data.toLinearIndex(x, y);
     }
 
     T& operator[](size_t index) {
@@ -111,30 +97,15 @@ public:
     }
 
     typename std::vector<T>::iterator begin() {
-        return _data.begin();
+        return _data.data().begin();
     }
 
     typename std::vector<T>::iterator end() {
-        return _data.end();
+        return _data.data().end();
     }
 
 private:
     std::array<size_t, 2> _size;
     std::array<size_t, 2> _shadow_size;
-    typename std::vector<T> _data;
+    typename ddl::ArrayND<T, 2> _data;
 };
-
-/*template <typename T>
-void copy(const ShadowedArray2D<T> &src, ShadowedArray2D<T> &dst,
-            size_t src_start_x = 0, size_t src_start_y = 0,            
-            size_t dst_start_x = 0, size_t dst_start_y = 0) {
-    const auto start_x = std::min(src_start_x, src.size(0));
-    const auto start_y = std::min(src_start_y, src.size(1));
-    const auto end_x = std::min(dst.size(0), src.size(0) + start_x);
-    const auto end_y = std::min(dst.size(1), src.size(1) + start_y);
-    for (size_t i = src_start_x; i < end_x; i++) {
-        for (size_t j = src_start_y; j < end_y; j++) {
-            dst(i + dst_start_x, j + dst_start_y) = src(i, j);
-        }
-    }
-}*/
