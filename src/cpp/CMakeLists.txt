@@ -4,6 +4,7 @@ project(MFPT_CPP CXX)
 
 add_executable(mfpt
     mfpt.cpp
+    output.cpp
 )
 
 install(TARGETS mfpt DESTINATION cpp)

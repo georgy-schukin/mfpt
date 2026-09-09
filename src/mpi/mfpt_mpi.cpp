@@ -109,7 +109,7 @@ int main(int argc, char **argv) {
     auto outputArray = [&](const std::string &header, const DArray2 &data) {
         if (rank == 0) {
             if (full_output) {
-                output(header, data, {0, (int)data.size(0), 0, (int)data.size(1)}, out_lst);
+                output(header, data, out_lst);
             } else {
                 output(header, data, output_range, out_lst);
             }

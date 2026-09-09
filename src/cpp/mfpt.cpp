@@ -1,4 +1,6 @@
-#include "array2d.h"
+#include "defs.h"
+#include "output.h"
+#include "timer.h"
 
 #include <vector>
 #include <array>
@@ -10,85 +12,6 @@
 #include <chrono>
 
 using namespace std;
-
-using DArray2 = Array2D<double>;
-using DArray1 = std::vector<double>;
-
-void pr2(DArray2 &b, int l1, int m1, int l2, int m2, ofstream &out) {
-    vector<double> v(8);
-    vector<int> mv(8);
-
-    int n1 = l1;
-    int n2 = l1 + 7;
-
-    while (true) {
-        if (n2 > m1) {
-            n2 = m1;
-        }
-        int n3 = n2 - n1 + 1;
-        for (int i = n1; i < n2; i++) {
-            mv[i + 1 - n1] = i;
-        }
-        //write(25,902) (mv(i),i=1,n3)
-        //902 format(7x,8(i3,6x))
-        out << setw(7) << "";
-        for (int i = 0; i < n3; i++) {
-            out << setw(3) << mv[i] << setw(6) << "";
-        }
-        out << endl;
-        for (int l0 = l2; l0 < m2; l0++) {
-            int l = m2 + l2 - l0;
-            int l02 = l;
-            for (int i = n1; i < n2; i++) {
-                v[i - n1 + 1] = b(i, l);
-            }
-            //write(25,903) l02,(v(i),i=1,n3)
-            //903 format(i3,1x,8f9.3)
-            out << setw(3) << l02 << setw(1) << "";
-            for (int i = 0; i < n3; i++) {
-                out << setw(9) << std::fixed << setprecision(3) << v[i];
-            }
-            out << endl;
-        }
-        if (n2 == m1) {
-            return;
-        }
-        n1 = n1 + 8;
-        n2 = n2 + 8;
-    }
-}
-
-void print(const DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
-    out << setw(7) << "";
-    for (int i = i_start; i < i_end; i++) {
-        out << setw(3) << i + 1;
-        if (i < i_end - 1) {
-            out << setw(6) << "";
-        }
-    }
-    out << std::endl;
-    for (int j = j_end - 1; j >= j_start; j--) {
-        out << setw(3) << j + 1 << setw(1) << "";
-        for (int i = i_start; i < i_end; i++) {
-            out << setw(10) << std::fixed << setprecision(3) << data(i, j);
-        }
-        out << std::endl;
-    }
-}
-
-void output(const string &header, const DArray2 &data, int i_start, int i_end, int j_start, int j_end, ofstream &out) {
-    out << "\n";
-    out << " " << header << "\n";
-    print(data, i_start, i_end, j_start, j_end, out);
-}
-
-void output(const string &header, const DArray2 &data, const std::array<int, 4> &range, ofstream &out) {
-    output(header, data, range[0], range[1], range[2], range[3], out);
-}
-
-void outputFull(const string &header, const DArray2 &data, ofstream &out) {
-    output(header, data, {0, data.size(0), 0, data.size(1)}, out);
-}
 
 int main(int argc, char **argv) {
 /*
@@ -173,14 +96,14 @@ int main(int argc, char **argv) {
     auto doOutput = [&](const std::string &header, const DArray2 &data) {
         if (file_output) {
             if (full_output) {
-                outputFull(header, data, out_lst);
+                output(header, data, out_lst);
             } else {
                 output(header, data, output_range, out_lst);
             }
         }
     };
 
-    auto ts = chrono::steady_clock::now();
+    Timer full_time;
 
 /*
     тестовое решение
@@ -246,7 +169,7 @@ c         s=dcos(pi*z/zm)
         double s = (1.5 * aa1(2, k) - 4.5 * aa1(1, k)) / hr2 +
                    (aa1(1, k + 1) - 2.0 * aa1(1, k) + aa1(1, k - 1)) / hz2;
         jf(1, k) = -s;
-        for (int i = 2; i < 2 * im + 1; i++) {            
+        for (int i = 2; i < 2 * im + 1; i++) {
             jf(i, k) = -compSolution(aa1, i, k);
         }
     }
@@ -567,8 +490,7 @@ c         s=dcos(pi*z/zm)
         out_lst.close();
     }
 
-    auto te = chrono::steady_clock::now();
-    auto time = chrono::duration<double>(te - ts).count();
+    auto time = full_time.time();
     cout << "Time: " << time << endl;
 
     return 0;

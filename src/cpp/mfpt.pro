@@ -6,7 +6,11 @@ CONFIG -= qt
 TARGET = mfpt
 
 SOURCES +=   \
-    mfpt.cpp
+    mfpt.cpp \
+    output.cpp
 
 HEADERS +=   \
-    array2d.h
+    array2d.h \
+    defs.h \
+    output.h \
+    timer.h
