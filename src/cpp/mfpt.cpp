@@ -13,6 +13,14 @@
 
 using namespace std;
 
+DArray1 computeSins(size_t size, double coeff) {
+    DArray1 dsins(size);
+    for (size_t k = 0; k < size; k++) {
+        dsins[k] = sin(coeff * k);
+    }
+    return dsins;
+}
+
 int main(int argc, char **argv) {
 /*
     program brbz003c
@@ -75,7 +83,6 @@ int main(int argc, char **argv) {
     DArray2 aa(ims2, kms), jf(ims2, kms), aa1(ims2, kms);
     DArray2 gg(ims2, kms), bb(ims2, kms), ff(ims2, kms), phi(ims2, kms);
     DArray2 dd(ims, kms), phi1(ims2, kms), ff1(ims2, kms);
-    DArray1 ds(2 * kms);
 
     ofstream out_lst;
     if (file_output) {
@@ -214,9 +221,8 @@ c         s=dcos(pi*z/zm)
          ds(k)=dsin(c*k)
       enddo
 */
-    for (int k = 0; k < 2 * km; k++) {
-        ds[k] = sin(c * k);
-    }
+
+    const auto dsins = computeSins(2 * km, c);
 
 /*
     преобразование Фурье для правых частей и для решения
@@ -243,29 +249,37 @@ c         s=dcos(pi*z/zm)
       enddo    ! i
 */
 
+    auto computeFFTAux = [&](const DArray2 &input, DArray2 &output, double coeff) {
+        for (int i = 1; i < 2 * im + 1; i++) {
+            for (int j = 1; j < km; j++) {
+                double s = 0.0;
+                int k1 = 0;
+                for (int k = 1; k < km; k++) {
+                    k1 = k1 + j;
+                    if (k1 >= 2 * km) {
+                        k1 = k1 - 2 * km;
+                    }
+                    s += input(i, k) * dsins[k1];
+                }
+                output(i, j) = s * coeff;
+            }
+            output(i, 0) = 0.0;
+            output(i, km) = 0.0;
+        }
+    };
+
+    auto computeFFT = [&computeFFTAux, km](const DArray2 &input, DArray2 &output) {
+        computeFFTAux(input, output, 2.0 / km);
+    };
+
+    auto computeFFTInverse = [&computeFFTAux](const DArray2 &input, DArray2 &output) {
+        computeFFTAux(input, output, 1.0);
+    };
+
     // i, j: bb(i, j) <- k, gg(i, k)
     // i, j: ff1(i, j) <- k, phi1(i, k)
-    const double km2 = km / 2.0;
-    for (int i = 1; i < 2 * im + 1; i++) {
-        for (int j = 1; j < km; j++) {
-            double s1 = 0.0, s2 = 0.0;
-            int k1 = 0;
-            for (int k = 1; k < km; k++) {
-                k1 = k1 + j;
-                if (k1 >= 2 * km) {
-                    k1 = k1 - 2 * km;
-                }
-                s1 += gg(i, k) * ds[k1];
-                s2 += phi1(i, k) * ds[k1];
-            }
-            bb(i, j) = s1 / km2;
-            ff1(i, j) = s2 / km2;
-        }
-        bb(i, 0) = 0.0;
-        bb(i, km) = 0.0;
-        ff1(i, 0) = 0.0;
-        ff1(i, km) = 0.0;
-    }
+    computeFFT(gg, bb);
+    computeFFT(phi1, ff1);
 
     doOutput("bb bb", bb);
 
@@ -337,22 +351,7 @@ c         s=dcos(pi*z/zm)
 */
 
     // i, k: phi(i, k) <- j, ff(i, j)
-    for (int i = 1; i < 2 * im + 1; i++) {
-        for (int k = 1; k < km; k++) {
-            double s1 = 0.0;
-            int k1 = 0;
-            for (int j = 1; j < km; j++) {
-                k1 = k1 + k;
-                if (k1 >= 2 * km) {
-                    k1 = k1 - 2 * km;
-                }
-                s1 = s1 + ff(i, j) * ds[k1];
-            }
-            phi(i, k) = s1;
-        }
-        phi(i, 0) = 0.0;
-        phi(i, km) = 0.0;
-    }
+    computeFFTInverse(ff, phi);
 
     doOutput("phi phi", phi);
     doOutput("phi1 phi1", phi1);
