@@ -79,7 +79,7 @@ int main(int argc, char **argv) {
     const size_t kms = km + 2;
 
     DArray2 br(ims, kms), bf(ims, kms), bz(ims, kms);
-    DArray1 sb(ims2), jb(ims2), al(ims2), be(ims2);
+    //DArray1 sb(ims2), jb(ims2), al(ims2), be(ims2);
     DArray2 aa(ims2, kms), jf(ims2, kms), aa1(ims2, kms);
     DArray2 gg(ims2, kms), bb(ims2, kms), ff(ims2, kms), phi(ims2, kms);
     DArray2 dd(ims, kms), phi1(ims2, kms), ff1(ims2, kms);
@@ -110,6 +110,11 @@ int main(int argc, char **argv) {
         }
     };
 
+    double ft_time = 0;
+    double prog_time = 0;
+    double sol_time = 0;
+    double mag_time = 0;
+
     Timer full_time;
 
 /*
@@ -130,20 +135,23 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
-    // k, i: aa1(i, k) <- expr
-    double a0 = -0.1;
-    double a = 1.0;
-    double d = 1.0;
-    for (int k = 0; k < km + 2; k++) {
-        const double z = hz * (k + 1 - 1.5);
-        const double z2 = z * z;
-        //double s = a * z * z * (z - 1.5 * zm) + d;
-        const double s = a0 * z2 * (z2 - 2.0 * zm * zm) + a * z2 * (z - 1.5 * zm) + d;
-        for (int i = 1; i < 2 * im + 2; i++) {
-            aa1(i, k) = s * (hr * (i + 1 - 1.5) * (2.0 * rm - hr * (i + 1 - 2.0)));
+    auto initTestSolution = [&](DArray2 &output) {
+        const double a0 = -0.1;
+        const double a = 1.0;
+        const double d = 1.0;
+        for (int k = 0; k < km + 2; k++) {
+            const double z = hz * (k + 1 - 1.5);
+            const double z2 = z * z;
+            const double s = a0 * z2 * (z2 - 2.0 * zm * zm) + a * z2 * (z - 1.5 * zm) + d;
+            for (int i = 1; i < 2 * im + 2; i++) {
+                output(i, k) = s * (hr * (i + 1 - 1.5) * (2.0 * rm - hr * (i + 1 - 2.0)));
+            }
+            output(0, k) = -output(1, k);
         }
-        aa1(0, k) = -aa1(1, k);
-    }
+    };
+
+    // k, i: aa1(i, k) <- expr
+    initTestSolution(aa1);
 
 /*
     тестовые токи
@@ -161,25 +169,25 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
-    auto compSolution = [hr2, hz2](const DArray2 &phi, int i, int k) {
+    auto getSolution = [hr2, hz2](const DArray2 &phi, int i, int k) {
         return (((i + 0.5) * phi(i + 1, k) - (i - 0.5) * phi(i, k)) / (i) -
                 ((i - 0.5) * phi(i, k) - (i - 1.5) * phi(i - 1, k)) / (i - 1.0)) / hr2 +
                (phi(i, k + 1) - 2.0 * phi(i, k) + phi(i, k - 1)) / hz2;
     };
 
-    auto compCheck = [&compSolution](const DArray2 &phi, const DArray2 &gg, int i, int k) {
-        return compSolution(phi, i, k) + gg(i, k);
+    auto initTestCurrent = [&](DArray2 &input, DArray2 &output) {
+        for (int k = 1; k < km + 1; k++) {
+            double s = (1.5 * input(2, k) - 4.5 * input(1, k)) / hr2 +
+                       (input(1, k + 1) - 2.0 * input(1, k) + input(1, k - 1)) / hz2;
+            output(1, k) = -s;
+            for (int i = 2; i < 2 * im + 1; i++) {
+                output(i, k) = -getSolution(aa1, i, k);
+            }
+        }
     };
 
     // k, i: jf(i, k) <- aa1(i+-1, k+-1)
-    for (int k = 1; k < km + 1; k++) {
-        double s = (1.5 * aa1(2, k) - 4.5 * aa1(1, k)) / hr2 +
-                   (aa1(1, k + 1) - 2.0 * aa1(1, k) + aa1(1, k - 1)) / hz2;
-        jf(1, k) = -s;
-        for (int i = 2; i < 2 * im + 1; i++) {
-            jf(i, k) = -compSolution(aa1, i, k);
-        }
-    }
+    initTestCurrent(aa1, jf);
 
     doOutput("aa1 aa1", aa1);
     doOutput("jf jf", jf);
@@ -199,18 +207,20 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
+    auto computeDifference = [&](DArray2 &input, DArray2 &output) {
+        for (int i = 1; i < 2 * im + 1; i++) {
+            for (int k = 1; k < km; k++) {
+                output(i, k) = input(i, k + 1) - input(i, k);
+            }
+            output(i, 0) = 0.0;
+            output(i, km) = 0.0;
+        }
+    };
+
     // i, k: gg(i, k) <- jf(i, k), jf(i, k + 1)
     // i, k: phi(i, k) <- aa1(i, k), aa1(i, k + 1)
-    for (int i = 1; i < 2 * im + 1; i++) {
-        for (int k = 1; k < km; k++) {
-            gg(i, k) = jf(i, k + 1) - jf(i, k);
-            phi1(i, k) = aa1(i, k + 1) - aa1(i, k);
-        }
-        gg(i, 0) = 0.0;
-        gg(i, km) = 0.0;
-        phi1(i, 0) = 0.0;
-        phi1(i, km) = 0.0;
-    }
+    computeDifference(jf, gg);
+    computeDifference(aa1, phi1);
 
     doOutput("gg gg", gg);
 
@@ -250,6 +260,7 @@ c         s=dcos(pi*z/zm)
 */
 
     auto computeFFTAux = [&](const DArray2 &input, DArray2 &output, double coeff) {
+        Timer tm;
         for (int i = 1; i < 2 * im + 1; i++) {
             for (int j = 1; j < km; j++) {
                 double s = 0.0;
@@ -266,6 +277,7 @@ c         s=dcos(pi*z/zm)
             output(i, 0) = 0.0;
             output(i, km) = 0.0;
         }
+        ft_time += tm.time();
     };
 
     auto computeFFT = [&computeFFTAux, km](const DArray2 &input, DArray2 &output) {
@@ -306,27 +318,33 @@ c         s=dcos(pi*z/zm)
       enddo     !   j
 */
 
+    auto computeProgonka = [&](const DArray2 &input, DArray2 &output) {
+        Timer tm;
+        DArray1 al(ims2), be(ims2);
+        for (int k = 1; k < km; k++) {
+            const double dsin = sin(c * k / 2.0);
+            double s = 9.0 / (2.0 * hr2) + (4.0 / hz2) * dsin * dsin;
+            al[1] = 3.0 / (2.0 * hr2 * s);
+            be[1] = input(1, k) / s;
+            for (int i = 2; i < 2 * im + 1; i++) {
+                s = (2.0 * ((i - 0.5) / hr) * ((i - 0.5) / hr)) / ((i) * (i - 1.0)) +
+                    (4.0 / hz2) * dsin * dsin -
+                    al[i - 1] * (i - 1.5) / ((i - 1.0) * hr2);
+                al[i] = (i + 0.5) / (s * (i) * hr2);
+                be[i] = (be[i - 1] * (i - 1.5) / ((i - 1.0) * hr2) + input(i, k)) / s;
+            }
+            output(2 * im + 1, k) = 0.0;
+            for (int i = 2 * im; i >= 1; i--) {
+                output(i, k) = al[i] * output(i + 1, k) + be[i];
+            }
+        }
+        prog_time += tm.time();
+    };
+
     // j, i: al(i) <- al(i - 1)
     // j, i: be(i) <- be(i - 1)
     // j, i: ff(i, j) <- al(i), be(i), ff(i + 1, j)
-    for (int j = 1; j < km; j++) {
-        const double ss = sin(c * (j + 1 - 1.0) / 2.0);
-        double s = 9.0 / (2.0 * hr2) + (4.0 / hz2) * ss * ss;
-        al[1] = 3.0 / (2.0 * hr2 * s);
-        be[1] = bb(1, j) / s;
-        for (int i = 2; i < 2 * im + 1; i++) {
-            const auto dsin = sin(c * (j + 1 - 1.0) / 2.0);
-            s = (2.0 * ((i + 1 - 1.5) / hr) * ((i + 1 - 1.5) / hr)) / ((i + 1 - 1.0) * (i + 1 - 2.0)) +
-                (4.0 / hz2) * dsin * dsin -
-                al[i - 1] * (i + 1 - 2.5) / ((i + 1 - 2.0) * hr2);
-            al[i] = (i + 1 - 0.5) / (s * (i + 1 - 1.0) * hr2);
-            be[i] = (be[i - 1] * (i + 1 - 2.5) / ((i + 1 - 2.0) * hr2) + bb(i, j)) / s;
-        }
-        ff(2 * im + 1, j) = 0.0;
-        for (int i = 2 * im; i >= 1; i--) {
-            ff(i, j) = al[i] * ff(i + 1, j) + be[i];
-        }
-    }
+    computeProgonka(bb, ff);
 
     doOutput("ff ff", ff);
     doOutput("ff1 ff1", ff1);
@@ -368,18 +386,18 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
-    auto compSolutionDifference = [&](const DArray2 &phi, const DArray2 &gg) -> DArray2 {
-        DArray2 diff(im + 2, km + 2);
+    auto computeSolutionDifference = [&](DArray2 &first, const DArray2 &second) -> DArray2 {
+        DArray2 output(im + 2, km + 2);
         for (int i = 2; i < im + 1; i++) {
             for (int k = 1; k < km + 1; k++) {
-                diff(i, k) = std::abs(compCheck(phi, gg, i, k));
+                output(i, k) = std::abs(getSolution(first, i, k) + second(i, k));
             }
         }
-        return diff;
+        return output;
     };
 
     // i, k: dd(i, k) <- phi(i+-1, k+-1)
-    doOutput("proverka2 dd dd", compSolutionDifference(phi, gg));
+    doOutput("proverka2 dd dd", computeSolutionDifference(phi, gg));
 
 /*
     решение при к=2
@@ -398,26 +416,7 @@ c         s=dcos(pi*z/zm)
       do i=2*im,1,-1
          aa(i+1,2)=al(i)*aa(i+2,2)+be(i)
       enddo
-*/
 
-    // i: al(i) <- al(i - 1)
-    // i: be(i) <- be(i - 1), phi(i + 1, 1), jf(i + 1, 1)
-    // i: aa(i + 1, 1) <- al(i), be(i), aa(i + 2, 1)
-    al[0] = 1.0 / 3.0;
-    be[0] = (2.0 * hr2 / 9.0) * (jf(1, 1) + phi(1,1) / hz2);
-
-    for (int i = 1; i < 2 * im; i++) {
-        double s = 2.0 * (i + 1 - 0.5) * (i + 1 - 0.5) / ((i + 1) * (i + 1 - 1.0)) - al[i - 1] * (i + 1 - 1.5) / (i + 1 - 1.0);
-        al[i] = (i + 1 + 0.5) / ((i + 1) * s);
-        be[i] = (be[i - 1] * (i + 1 - 1.5) / (i + 1 - 1.0) + hr2 * (jf(i + 1, 1) + phi(i + 1, 1) / hz2)) / s;
-    }
-
-    aa(2 * im + 1, 1) = 0.0;
-    for (int i = 2 * im - 1; i >= 0; i--) {
-        aa(i + 1, 1) = al[i] * aa(i + 2, 1) + be[i];
-    }
-
-/*
     решение во всей области
 
       do i=2,im+2
@@ -427,14 +426,40 @@ c         s=dcos(pi*z/zm)
          enddo
       enddo
 */
+    auto compSolution = [&](const DArray2 &phi, const DArray2 &jf, DArray2 &aa) {
+        Timer tm;
+        DArray1 al(ims2), be(ims2);
+        al[0] = 1.0 / 3.0;
+        be[0] = (2.0 * hr2 / 9.0) * (jf(1, 1) + phi(1,1) / hz2);
 
-    // i, k: aa(i, k + 1) <- aa(i, k), phi(i, k)
-    for (int i = 1; i < im + 2; i++) {
-        aa(i, 0) = aa(i, 1);
-        for (int k = 1; k < km + 1; k++) {
-            aa(i, k + 1) = aa(i, k) + phi(i, k);
+        // i: al(i) <- al(i - 1)
+        // i: be(i) <- be(i - 1), phi(i + 1, 1), jf(i + 1, 1)
+        // i: aa(i + 1, 1) <- al(i), be(i), aa(i + 2, 1)
+        for (int i = 1; i < 2 * im; i++) {
+            double s = 2.0 * (i + 0.5) * (i + 0.5) / ((i + 1) * (i)) - al[i - 1] * (i - 0.5) / (i);
+            al[i] = (i + 1.5) / ((i + 1) * s);
+            be[i] = (be[i - 1] * (i - 0.5) / (i) + hr2 * (jf(i + 1, 1) + phi(i + 1, 1) / hz2)) / s;
         }
-    }
+
+        // i: 2*im-1..0: aa(i + 1, 1) <- al(i), be(i), aa(i + 2, 1)
+        // i: seq
+        aa(2 * im + 1, 1) = 0.0;
+        for (int i = 2 * im - 1; i >= 0; i--) {
+            aa(i + 1, 1) = al[i] * aa(i + 2, 1) + be[i];
+        }
+
+        // i: 1..im+2, k: 1..km+1: aa(i, k + 1) <- aa(i, k), phi(i, k)
+        // i: par, k: seq
+        for (int i = 1; i < im + 2; i++) {
+            aa(i, 0) = aa(i, 1);
+            for (int k = 1; k < km + 1; k++) {
+                aa(i, k + 1) = aa(i, k) + phi(i, k);
+            }
+        }
+        sol_time += tm.time();
+    };
+
+    compSolution(phi, jf, aa);
 
     doOutput("aa aa", aa);
 
@@ -451,7 +476,7 @@ c         s=dcos(pi*z/zm)
 */
 
     // i, k: dd(i, k) <- aa(i+-1, k+-1), jf(i, k)
-    doOutput("dd dd", compSolutionDifference(aa, jf));
+    doOutput("dd dd", computeSolutionDifference(aa, jf));
 
 /*
     вычисление магнитных полей
@@ -470,27 +495,38 @@ c         s=dcos(pi*z/zm)
       enddo
 */
 
-    // k, i: bz(i, k) <- aa(i, k), aa(i + 1, k)
-    for (int k = 0; k < km + 2; k++) {
-        bz(0, k) = 4.0 * aa(1, k) / hr;
-        for (int i = 1; i < im + 2; i++) {
-            bz(i, k) = ((i + 1 - 0.5) * aa(i + 1, k) - (i + 1 - 1.5) * aa(i, k)) / (hr * (i + 1 - 1.0));
+    auto computeMagnetics = [&](DArray2 &input, DArray2 &bz, DArray2 &br) {
+        Timer tm;
+        for (int k = 0; k < km + 2; k++) {
+            bz(0, k) = 4.0 * input(1, k) / hr;
+            for (int i = 1; i < im + 2; i++) {
+                bz(i, k) = ((i + 0.5) * input(i + 1, k) - (i - 0.5) * input(i, k)) / (hr * (i));
+            }
         }
-    }
 
-    // k, i: br(i, k) <- aa(i, k), aa(i, k + 1)
-    for (int k = 0; k < km + 1; k++) {
-        for (int i = 0; i < im + 2; i++) {
-            br(i, k) = -(aa(i, k + 1) - aa(i, k)) / hz;
+        for (int k = 0; k < km + 1; k++) {
+            for (int i = 0; i < im + 2; i++) {
+                br(i, k) = -(input(i, k + 1) - input(i, k)) / hz;
+            }
         }
-    }
+        mag_time += tm.time();
+    };
+
+    // k, i: bz(i, k) <- aa(i, k), aa(i + 1, k)
+    // k, i: br(i, k) <- aa(i, k), aa(i, k + 1)
+    // i: par, k: par
+    computeMagnetics(aa, bz, br);
 
     if (file_output) {
         out_lst.close();
     }
 
     auto time = full_time.time();
-    cout << "Time: " << time << endl;
+    cout << "TIME: " << time << endl;
+    cout << "FT: " << ft_time <<
+        ", Prog: " << prog_time <<
+        ", Sol: " << sol_time <<
+        ", Mag: " << mag_time << endl;
 
     return 0;
 }
