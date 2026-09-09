@@ -1,6 +1,6 @@
 #include "defs.h"
-#include "output.h"
-#include "timer.h"
+#include "../common/output.h"
+#include "../common/timer.h"
 
 #include <vector>
 #include <array>
@@ -261,14 +261,15 @@ c         s=dcos(pi*z/zm)
 
     auto computeFFTAux = [&](const DArray2 &input, DArray2 &output, double coeff) {
         Timer tm;
+        const auto km2 = 2 * km;
         for (int i = 1; i < 2 * im + 1; i++) {
             for (int j = 1; j < km; j++) {
                 double s = 0.0;
                 int k1 = 0;
                 for (int k = 1; k < km; k++) {
                     k1 = k1 + j;
-                    if (k1 >= 2 * km) {
-                        k1 = k1 - 2 * km;
+                    if (k1 >= km2) {
+                        k1 -= km2;
                     }
                     s += input(i, k) * dsins[k1];
                 }

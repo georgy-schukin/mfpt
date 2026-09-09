@@ -2,7 +2,7 @@
 
 #include <mpi.h>
 
-#include "common.h"
+#include "defs.h"
 #include "block_decomp.h"
 
 MPI_Datatype makeColType(const DArray2 &array);

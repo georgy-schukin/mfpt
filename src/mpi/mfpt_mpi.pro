@@ -12,13 +12,12 @@ TARGET = mfpt_mpi
 SOURCES +=   \
     block_decomp.cpp \
     comm_util.cpp \
-    mfpt_mpi.cpp \
-    output.cpp
+    mfpt_mpi.cpp
 
 HEADERS +=   \
+    ../common/output.h \
+    ../common/timer.h \
     block_decomp.h \
     comm_util.h \
-    common.h \
-    output.h \
-    shadowed_array2d.h \
-    timer.h
+    defs.h \
+    shadowed_array2d.h

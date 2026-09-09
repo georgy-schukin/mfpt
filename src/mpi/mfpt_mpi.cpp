@@ -1,8 +1,8 @@
-#include "common.h"
+#include "defs.h"
 #include "block_decomp.h"
 #include "comm_util.h"
-#include "output.h"
-#include "timer.h"
+#include "../common/output.h"
+#include "../common/timer.h"
 
 #include <mpi.h>
 

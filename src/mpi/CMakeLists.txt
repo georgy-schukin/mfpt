@@ -8,7 +8,6 @@ add_executable(mfpt_mpi
     block_decomp.cpp
     comm_util.cpp
     mfpt_mpi.cpp
-    output.cpp
 )
 
 target_link_libraries(mfpt_mpi PRIVATE MPI::MPI_CXX)
