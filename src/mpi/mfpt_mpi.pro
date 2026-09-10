@@ -9,6 +9,10 @@ QMAKE_LINK = mpicxx
 
 TARGET = mfpt_mpi
 
+exists(local.pri) {
+    include(local.pri)
+}
+
 SOURCES +=   \
     block_decomp.cpp \
     comm_util.cpp \

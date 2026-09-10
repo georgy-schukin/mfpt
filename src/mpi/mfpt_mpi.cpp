@@ -136,6 +136,10 @@ int main(int argc, char **argv) {
     double comp_time = 0;
     double shadow_time = 0;
     double reduce_time = 0;
+    double ft_time = 0;
+    double prog_time = 0;
+    double sol_time = 0;
+    double mag_time = 0;
 
 /*
     тестовое решение
@@ -300,19 +304,27 @@ c         s=dcos(pi*z/zm)
     auto vector_sum_op = makeVectorSumOp();
 
     auto computeFFTAux = [&](const DArray2 &input, DArray2 &output, double coeff) {
+        Timer ftm;
+        const auto my_k_start = my_km_range.localStart(1);
+        const auto my_k_end = my_km_range.localEnd(km);
+        const auto my_k_global_start = my_km_range.toGlobal(my_k_start);
         for (int r = 0; r < size; r++) {
             Timer tm;
-            const auto curr_range = kms_decomp.getRange(r);
-            const auto j_start = curr_range.localStart(1);
-            const auto j_end = curr_range.localEnd(km);
-            DArray2 tmp(output.size(0), curr_range.size(), 0.0, output.shadowSize(0), output.shadowSize(1));
+            const auto curr_j_range = kms_decomp.getRange(r);
+            const auto j_start = curr_j_range.localStart(1);
+            const auto j_end = curr_j_range.localEnd(km);
+            DArray2 tmp(output.size(0), curr_j_range.size(), 0.0, output.shadowSize(0), output.shadowSize(1));
             for (int i = 1; i < 2 * im + 1; i++) {
-                for (int j = j_start; j < j_end; j++) {
-                    double s = 0.0;
-                    const auto jj = curr_range.toGlobal(j);
-                    for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
-                        const auto kk = my_km_range.toGlobal(k);
-                        s += input(i, k) * dsins[(kk * jj) % dsins.size()];
+                int jj = curr_j_range.toGlobal(j_start);
+                for (int j = j_start; j < j_end; j++, jj++) {
+                    double s = 0.0;                                        
+                    int k1 = my_k_global_start * jj;
+                    for (int k = my_k_start; k < my_k_end; k++) {
+                        if (k1 >= 2 * km) {
+                            k1 -= 2 * km;
+                        }
+                        s += input(i, k) * dsins[k1];
+                        k1 += jj;
                     }
                     tmp(i, j) = s * coeff;
                 }
@@ -324,6 +336,7 @@ c         s=dcos(pi*z/zm)
             reduce_time += tm.time();
             MPI_Type_free(&type);
         }
+        ft_time += ftm.time();
     };
 
     auto computeFFT = [&computeFFTAux, km](const DArray2 &input, DArray2 &output) {
@@ -386,6 +399,7 @@ c         s=dcos(pi*z/zm)
             }
         }
         comp_time += tm.time();
+        prog_time += tm.time();
     };
 
     // k: 1..km, i: 2..2*im+1: al(i) <- al(i - 1)
@@ -512,6 +526,7 @@ c         s=dcos(pi*z/zm)
             }
         }
         comp_time += tm.time();
+        sol_time += tm.time();
     };
 
     // Temporary fix: compute solution on a root(0) node
@@ -558,6 +573,7 @@ c         s=dcos(pi*z/zm)
       enddo
 */
     auto computeMagnetics = [&](DArray2 &input, DArray2 &bz, DArray2 &br) {
+        Timer mtm;
         Timer tm;
         for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 2); k++) {
             bz(0, k) = 4.0 * input(1, k) / hr;
@@ -577,6 +593,7 @@ c         s=dcos(pi*z/zm)
             }
         }
         comp_time += tm.time();
+        mag_time += mtm.time();
     };
 
     // k: 0..km+2, i: 1..im+2: bz(i, k) <- aa(i, k), aa(i + 1, k)
@@ -603,7 +620,11 @@ c         s=dcos(pi*z/zm)
     out << rank << ": Work time: " << work_time <<
         ", Comp time: " << comp_time <<
         ", Shadow time: " << shadow_time <<
-        ", Reduce time: " << reduce_time << endl;
+        ", Reduce time: " << reduce_time <<
+        ", FT: " << ft_time <<
+        ", Prog: " << prog_time <<
+        ", Sol: " << sol_time <<
+        ", Mag: " << mag_time << endl;
 
     std::cout << out.str();
 
