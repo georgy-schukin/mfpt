@@ -308,6 +308,7 @@ c         s=dcos(pi*z/zm)
         const auto my_k_start = my_km_range.localStart(1);
         const auto my_k_end = my_km_range.localEnd(km);
         const auto my_k_global_start = my_km_range.toGlobal(my_k_start);
+        const auto dsins_size = dsins.size();
         for (int r = 0; r < size; r++) {
             Timer tm;
             const auto curr_j_range = kms_decomp.getRange(r);
@@ -318,10 +319,10 @@ c         s=dcos(pi*z/zm)
                 int jj = curr_j_range.toGlobal(j_start);
                 for (int j = j_start; j < j_end; j++, jj++) {
                     double s = 0.0;                                        
-                    int k1 = my_k_global_start * jj;
+                    int k1 = (my_k_global_start * jj) % dsins_size;
                     for (int k = my_k_start; k < my_k_end; k++) {
-                        if (k1 >= 2 * km) {
-                            k1 -= 2 * km;
+                        if (k1 >= dsins_size) {
+                            k1 -= dsins_size;
                         }
                         s += input(i, k) * dsins[k1];
                         k1 += jj;
