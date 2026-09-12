@@ -1,0 +1,1 @@
+      parameter(im=80,imp=im+2,n=7,km=2**n,kmp=km+2)
