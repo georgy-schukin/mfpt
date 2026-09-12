@@ -261,15 +261,15 @@ c         s=dcos(pi*z/zm)
 
     auto computeFFTAux = [&](const DArray2 &input, DArray2 &output, double coeff) {
         Timer tm;
-        const auto km2 = 2 * km;
+        const auto dsins_size = dsins.size();
         for (int i = 1; i < 2 * im + 1; i++) {
             for (int j = 1; j < km; j++) {
                 double s = 0.0;
-                int k1 = 0;
+                size_t k1 = 0;
                 for (int k = 1; k < km; k++) {
                     k1 = k1 + j;
-                    if (k1 >= km2) {
-                        k1 -= km2;
+                    if (k1 >= dsins_size) {
+                        k1 -= dsins_size;
                     }
                     s += input(i, k) * dsins[k1];
                 }

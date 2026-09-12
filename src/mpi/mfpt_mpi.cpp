@@ -316,10 +316,10 @@ c         s=dcos(pi*z/zm)
             const auto j_end = curr_j_range.localEnd(km);
             DArray2 tmp(output.size(0), curr_j_range.size(), 0.0, output.shadowSize(0), output.shadowSize(1));
             for (int i = 1; i < 2 * im + 1; i++) {
-                int jj = curr_j_range.toGlobal(j_start);
+                size_t jj = curr_j_range.toGlobal(j_start);
                 for (int j = j_start; j < j_end; j++, jj++) {
                     double s = 0.0;                                        
-                    int k1 = (my_k_global_start * jj) % dsins_size;
+                    size_t k1 = (my_k_global_start * jj) % dsins_size;
                     for (int k = my_k_start; k < my_k_end; k++) {
                         if (k1 >= dsins_size) {
                             k1 -= dsins_size;
