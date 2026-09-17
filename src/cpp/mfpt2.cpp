@@ -10,28 +10,109 @@
 #include <cmath>
 #include <string>
 #include <chrono>
+#include <complex>
 
 using namespace std;
 
-DArray1 computeSins(size_t size, double coeff) {
-    DArray1 dsins(size);
-    for (size_t k = 0; k < size; k++) {
-        dsins[k] = sin(coeff * k);
+/*
+      subroutine fftc(a,n,isi,np)
+      implicit real*8(a-h,o-z)
+      complex*16 a(np),t,w,w1
+
+      do 7 i=1,np
+      if(isi.gt.0) a(i)=a(i)/np
+    7 continue
+
+      pi2=8.d-0*datan(1.d-0)
+      nn=np
+      j=1
+
+      do 3 i=1,nn
+      if(i.ge.j) go to 1
+      t=a(j)
+      a(j)=a(i)
+      a(i)=t
+    1 m=nn/2
+    2 if(j.le.m) go to 3
+      j=j-m
+      m=m/2
+      if(m.ge.1) go to 2
+    3 j=j+m
+
+      mm=1
+    4 if(mm.ge.nn) return
+      ii=2*mm
+      th= pi2/isign(ii,n*isi)
+      w1=dcmplx(-2.0 d-0*dsin(th/2)**2,dsin(th))
+      w=1
+      do 6 m=1,mm
+      do 5 i=m,nn,ii
+      t=w*a(i+mm)
+      a(i+mm)=a(i)-t
+      a(i)=a(i)+t
+    5 continue
+      w=w1*w+w
+    6 continue
+      mm=ii
+      go to 4
+      end
+ */
+
+using Complex = std::complex<double>;
+using CArray1 = std::vector<Complex>;
+using namespace std::complex_literals;
+
+void fftc(CArray1 &a, int n, int isi, int np) {
+    if (isi > 0) {
+        for (int i = 0; i < np; i++) {
+            a[i] /= np;
+        }
     }
-    return dsins;
+    const double pi2 = 8.0 * std::atan(1.0);
+    int nn = np;
+    int j = 1;
+    for (int i = 1; i <= nn; i++) {
+        if (i < j) {
+            std::swap(a[i - 1], a[j - 1]);
+        }
+        int m = nn / 2;
+        do {
+            if (j <= m) {
+                break;
+            }
+            j -= m;
+            m /= 2;
+        } while (m >= 1);
+        j = j + m;
+    }
+    int mm = 1;
+    while (mm < nn) {
+        int ii = 2 * mm;
+        double th = pi2 / (n * isi >= 0 ? std::abs(ii) : -std::abs(ii));
+        const auto sin_th = std::sin(th);
+        const auto sin_th_d2 = std::sin(th * 0.5);
+        Complex w1 {-2.0 * sin_th_d2 * sin_th_d2, sin_th};
+        Complex w = 1.0;
+        for (int m = 1; m <= mm; m++) {
+            for (int i = m; i <= nn; i += ii) {
+                const auto t = w * a[i + mm - 1];
+                a[i + mm - 1] = a[i - 1] - t;
+                a[i - 1] += t;
+            }
+            w = w1 * w + w;
+        }
+        mm = ii;
+    }
 }
 
 int main(int argc, char **argv) {
 /*
-    program brbz003c
-    Тестовая программа.
     Двумерное уравнение Пуассона. Гран.условия 2-го рода.
-    Преобразование Фурье и прогонка.
-    Предварительно вычисленные синусы.
+    Быстрое преобразование Фурье и прогонка.
 */
 
     const int IM_DEF = 20;
-    const int KM_DEF = 60;
+    const int N_DEF = 6;
     const int FOUT_DEF = 1;
     const int FULL_OUTPUT_DEF = 0;
 
@@ -40,7 +121,7 @@ int main(int argc, char **argv) {
         if (s == "-h" || s == "--help") {
             cout << argv[0] <<
                 " [im=" << IM_DEF << "]" <<
-                " [km=" << KM_DEF << "]" <<
+                " [n=" << N_DEF << "]" <<
                 " [file_output=" << FOUT_DEF << "]" <<
                 " [full_output=" << FULL_OUTPUT_DEF << "]" <<
                 endl;
@@ -49,54 +130,58 @@ int main(int argc, char **argv) {
     }
 
     const int im = (argc > 1) ? stoi(argv[1]) : IM_DEF;
-    const int km = (argc > 2) ? stoi(argv[2]) : KM_DEF;
+    const int n = (argc > 2) ? stoi(argv[2]) : N_DEF;
+    const int km = std::pow(2, n);
     const bool file_output = (argc > 3) ? stoi(argv[3]) : FOUT_DEF;
     const bool full_output = (argc > 4) ? stoi(argv[4]) : FULL_OUTPUT_DEF;
 
-/*
+/*      
+    integer imp,kmp,im,km,i,k,n,k1,km2,j,k2,i1,m,nj,j1
+    parameter(im=20,n=6,km=2**n,imp=im+2,kmp=km+2)
     real*8 br(imp,kmp),bf(imp,kmp),bz(imp,kmp)
-    real*8 sb(2*imp),jb(2*imp),al(2*imp),be(2*imp)
+    real*8 al(2*imp),be(2*imp)
     real*8 aa(2*imp,kmp),jf(2*imp,kmp),aa1(2*imp,kmp)
-    real*8 gg(2*imp,kmp),bb(2*imp,kmp),ff(2*imp,kmp),phi(2*imp,kmp)
-    real*8 dd(imp,kmp),phi1(2*imp,kmp),ff1(2*imp,kmp),ds(2*kmp)
+    real*8 gg(2*imp,kmp),phi(2*imp,kmp),phi2(2*imp,kmp)
+    real*8 dd(imp,kmp),phi1(2*imp,kmp)
+    real*8 hr,hz,s,s1,s2,s3,eps,b0,pi,c,s4,t1,t2
+    real*8 alpha, delta,r,f,rm,zm,a,d,z,a0
+    complex*16 dan(2*km)
+    real*8 bb(2*imp,4*km),ff(2*imp,4*km),ff1(2*imp,4*km)
 */
-
-    // aa1(2 * im + 2, km + 2)
-    // jf(2 * im + 2, km + 2)
-    // gg(2 * im + 2, km + 1), phi1(2 * im + 2, km + 1)
-    // ds(2 * km)
-    // bb(2 * im + 1, km + 1), ff1(2 * im + 1, km + 1)
-    // al(2 * im + 1), be(2 * im + 1)
-    // ff(2 * im + 2, km)
-    // phi(2 * im + 1, km + 1)
-    // dd(im + 1, km + 1)
-    // aa(2 * im + 2, km + 2)
-    // bz(im + 2, km + 2)
-    // br(im + 2, km + 1)
 
     const size_t ims = im + 2;
     const size_t ims2 = 2 * im + 2;
     const size_t kms = km + 2;
 
-    DArray2 br(ims, kms), bf(ims, kms), bz(ims, kms);
-    //DArray1 sb(ims2), jb(ims2), al(ims2), be(ims2);
+    DArray2 br(ims, kms), bf(ims, kms), bz(ims, kms);    
     DArray2 aa(ims2, kms), jf(ims2, kms), aa1(ims2, kms);
     DArray2 gg(ims2, kms), bb(ims2, kms), ff(ims2, kms), phi(ims2, kms);
     DArray2 dd(ims, kms), phi1(ims2, kms), ff1(ims2, kms);
 
     ofstream out_lst;
     if (file_output) {
-        out_lst.open("output.lst");
+        out_lst.open("output2.lst");
     }
 
+/*
+    pi=3.14159265358979d0
+    c=0.5d0*pi/km
+    rm=4.d0
+    zm=12.d0
+    hr=rm/im
+    hz=zm/km
+*/
+
     const double pi = 3.14159265358979;
-    const double c = pi / km;
-    const double hr = 0.2;
-    const double hz = 0.2;
-    const double rm = im * hr;
-    const double zm = km * hz;
+    const double c = 0.5 * pi / km;
+    const double rm = 4.0;
+    const double zm = 12.0;
+    const double hr = rm / im;
+    const double hz = zm / km;
     const double hr2 = hr * hr;
     const double hz2 = hz * hz;
+    const double rhr2 = 1.0 / hr2;
+    const double rhz2 = 1.0 / hz2;
 
     const std::array<int, 4> output_range = {0, 7, 0, 6};
 
@@ -121,36 +206,44 @@ int main(int argc, char **argv) {
     тестовое решение
 
       a0=-0.1d0
-      a=1.d0
-      d=1.d0
+      a=1.d-3
+      d=1.d0+1.d-5*m
+
       do k=1,km+2
          z=hz*(k-1.5d0)
-         s=a*z**2*(z-1.5d0*zm)+d
-         s=a0*z**2*(z**2-2.d0*zm**2)+a*z**2*(z-1.5d0*zm)+d
-c         s=dcos(pi*z/zm)
+         s=a*z**2*(z-1.5d0-zm)+d
          do i=2,2*im+2
-            aa1(i,k)=s*(hr*(i-1.5d0)*(2.d0*rm-hr*(i-2.d0)))
+            aa1(i,k)=s*(i-2*im-2.d0)*(i-1.5d0)*hr**2
          enddo
             aa1(1,k)=-aa1(2,k)
+            aa1(2*im+2,k)=0.d0
       enddo
+         do i=1,2*im+2
+            aa1(i,1)=aa1(i,2)
+            aa1(i,km+2)=aa1(i,km+1)
+         enddo
 */
 
     auto initTestSolution = [&](DArray2 &output) {
         const double a0 = -0.1;
-        const double a = 1.0;
-        const double d = 1.0;
+        const double a = 1e-3;
+        const double d = 1.0 + 1e-5;
         for (int k = 0; k < km + 2; k++) {
             const double z = hz * (k + 1 - 1.5);
             const double z2 = z * z;
-            const double s = a0 * z2 * (z2 - 2.0 * zm * zm) + a * z2 * (z - 1.5 * zm) + d;
+            const double s = a * z2 * (z - 1.5 - zm) + d;
             for (int i = 1; i < 2 * im + 2; i++) {
-                output(i, k) = s * (hr * (i + 1 - 1.5) * (2.0 * rm - hr * (i + 1 - 2.0)));
+                output(i, k) = s * (i + 1 - 2 * im - 2.0) * (i + 1 - 1.5) * hr2;
             }
             output(0, k) = -output(1, k);
+            output(2 * im + 1, k) = 0.0;
+        }
+        for (int i = 0; i < 2 * im + 2; i++) {
+            output(i, 0) = output(i, 1);
+            output(i, km + 1) = output(i, km);
         }
     };
 
-    // k, i: aa1(i, k) <- expr
     initTestSolution(aa1);
 
 /*
@@ -162,23 +255,23 @@ c         s=dcos(pi*z/zm)
          jf(2,k)=-s
          do i=3,2*im+1
             s=(((i-0.5d0)*aa1(i+1,k)-(i-1.5d0)*aa1(i,k))/(i-1.d0)-
-     =        ((i-1.5d0)*aa1(i,k)-(i-2.5d0)*aa1(i-1,k))/(i-2.d0))/hr**2+
+     =       ((i-1.5d0)*aa1(i,k)-(i-2.5d0)*aa1(i-1,k))/(i-2.d0))/hr**2+
      =        (aa1(i,k+1)-2.d0*aa1(i,k)+aa1(i,k-1))/hz**2
             jf(i,k)=-s
          enddo
       enddo
 */
 
-    auto getSolution = [hr2, hz2](const DArray2 &phi, int i, int k) {
+    auto getSolution = [rhr2, rhz2](const DArray2 &phi, int i, int k) {
         return (((i + 0.5) * phi(i + 1, k) - (i - 0.5) * phi(i, k)) / (i) -
-                ((i - 0.5) * phi(i, k) - (i - 1.5) * phi(i - 1, k)) / (i - 1.0)) / hr2 +
-               (phi(i, k + 1) - 2.0 * phi(i, k) + phi(i, k - 1)) / hz2;
+                ((i - 0.5) * phi(i, k) - (i - 1.5) * phi(i - 1, k)) * rhr2 / (i - 1.0)) +
+               (phi(i, k + 1) - 2.0 * phi(i, k) + phi(i, k - 1)) * rhz2;
     };
 
     auto initTestCurrent = [&](DArray2 &input, DArray2 &output) {
         for (int k = 1; k < km + 1; k++) {
-            double s = (1.5 * input(2, k) - 4.5 * input(1, k)) / hr2 +
-                       (input(1, k + 1) - 2.0 * input(1, k) + input(1, k - 1)) / hz2;
+            double s = (1.5 * input(2, k) - 4.5 * input(1, k)) * rhr2 +
+                       (input(1, k + 1) - 2.0 * input(1, k) + input(1, k - 1)) * rhz2;
             output(1, k) = -s;
             for (int i = 2; i < 2 * im + 1; i++) {
                 output(i, k) = -getSolution(aa1, i, k);
@@ -225,98 +318,68 @@ c         s=dcos(pi*z/zm)
     doOutput("gg gg", gg);
 
 /*
-    вычисление синусов
+    преобразование Фурье для правых частей
 
-      do k=1,2*km
-         ds(k)=dsin(c*k)
-      enddo
-*/
+    do i=2,2*im+1
+        do k=1,km
+            dan(k)=dcmplx(jf(i,k+1),0.d0)
+            dan(k+km)=dcmplx(jf(i,km+2-k),0.d0)
+        enddo
 
-    const auto dsins = computeSins(2 * km, c);
+        call fftc(dan,2*n,1,2*km)
 
-/*
-    преобразование Фурье для правых частей и для решения
-
-      km2=km/2
-      do i=2,2*im+1
-         do j=2,km
-            s1=0.d0
-            s2=0.d0
-            k1=0
-            do k=2,km
-               k1=k1+j-1
-               if(k1.gt.2*km) k1=k1-2*km
-               s1=s1+gg(i,k)*ds(k1)
-               s2=s2+phi1(i,k)*ds(k1)
-            enddo
-            bb(i,j)=s1/km2
-            ff1(i,j)=s2/km2
+        do k=1,2*km
+            bb(i,k)=dreal(dan(k))
+            bb(i,2*km+k)=dimag(dan(k))
          enddo
-         bb(i,1)=0.d0
-         bb(i,km+1)=0.d0
-         ff1(i,1)=0.d0
-         ff1(i,km+1)=0.d0
-      enddo    ! i
+    enddo    ! i
 */
 
-    auto computeFFTAux = [&](const DArray2 &input, DArray2 &output, double coeff) {
-        Timer tm;
-        const auto dsins_size = dsins.size();
+    auto computeFFT = [&](const DArray2 &input, DArray2 &output) {
+        CArray1 dan(2 * km);
         for (int i = 1; i < 2 * im + 1; i++) {
-            for (int j = 1; j < km; j++) {
-                double s = 0.0;
-                size_t k1 = 0;
-                for (int k = 1; k < km; k++) {
-                    k1 = k1 + j;
-                    if (k1 >= dsins_size) {
-                        k1 -= dsins_size;
-                    }
-                    s += input(i, k) * dsins[k1];
-                }
-                output(i, j) = s * coeff;
+            for (int k = 0; k < km; k++) {
+                dan[k] = Complex {input(i, k + 1), 0.0};
+                dan[k + km] = Complex {input(i, km + 2 - k), 0.0};
             }
-            output(i, 0) = 0.0;
-            output(i, km) = 0.0;
+            fftc(dan, 2 * n, 1, 2 * km);
+            for (int k = 1; k < 2 * km; k++) {
+                output(i, k) = dan[k].real();
+                output(i, 2 * km + k) = dan[k].imag();
+            }
         }
-        ft_time += tm.time();
     };
 
-    auto computeFFT = [&computeFFTAux, km](const DArray2 &input, DArray2 &output) {
-        computeFFTAux(input, output, 2.0 / km);
-    };
-
-    auto computeFFTInverse = [&computeFFTAux](const DArray2 &input, DArray2 &output) {
-        computeFFTAux(input, output, 1.0);
-    };
-
-    // i, j: bb(i, j) <- k, gg(i, k)
-    // i, j: ff1(i, j) <- k, phi1(i, k)
-    computeFFT(gg, bb);
-    computeFFT(phi1, ff1);
+    computeFFT(jf, bb);
 
     doOutput("bb bb", bb);
 
 /*
     прогонка по радиусу
 
-      do j=2,km
-         s=9.d0/(2.d0*hr**2)+(4.d0/hz**2)*(dsin(c*(j-1.d0)/2.d0))**2
-         al(2)=3.d0/(2.d0*hr**2*s)
-         be(2)=bb(2,j)/s
+    do j=1,4*km
+        j1=j-1
+        if(j1.ge.2*km) j1=j1-2*km
 
-         do i=3,2*im+1
+        s=9.d0/(2.d0*hr**2)+(4.d0/hz**2)*(dsin(c*j1))**2
+        al(2)=3.d0/(2.d0*hr**2*s)
+        be(2)=bb(2,j)/s
+
+        do i=3,2*im+1
             s=(2.d0*((i-1.5d0)/hr)**2)/((i-1.d0)*(i-2.d0))+
-     =         (4.d0/hz**2)*(dsin(c*(j-1.d0)/2.d0))**2-
+     =         (4.d0/hz**2)*(dsin(c*j1))**2-
      =         al(i-1)*(i-2.5d0)/((i-2.d0)*hr**2)
-            al(i)=(i-0.5d0)/(s*(i-1.d0)*hr**2)
-            be(i)=(be(i-1)*(i-2.5d0)/((i-2.d0)*hr**2)+bb(i,j))/s
-         enddo
+           al(i)=(i-0.5d0)/(s*(i-1.d0)*hr**2)
+           be(i)=(be(i-1)*(i-2.5d0)/((i-2.d0)*hr**2)+bb(i,j))/s
+        enddo
 
-         ff(2*im+2,j)=0.d0
-         do i=2*im+1,2,-1
-            ff(i,j)=al(i)*ff(i+1,j)+be(i)
-         enddo
-      enddo     !   j
+        ff(2*im+2,j)=0.d0
+
+        do i=2*im+1,2,-1
+           ff(i,j)=al(i)*ff(i+1,j)+be(i)
+        enddo
+
+    enddo     !   j
 */
 
     auto computeProgonka = [&](const DArray2 &input, DArray2 &output) {
@@ -353,23 +416,36 @@ c         s=dcos(pi*z/zm)
 /*
     обратное преобразование Фурье
 
-      do i=2,2*im+1     !    im+1 ?
-         do k=2,km
-            s1=0.d0
-            k1=0
-            do j=2,km
-               k1=k1+k-1
-               if(k1.gt.2*km) k1=k1-2*km
-               s1=s1+ff(i,j)*ds(k1)
-            enddo
-            phi(i,k)=s1
-         enddo
-         phi(i,1)=0.d0
-         phi(i,km+1)=0.d0
-      enddo     !   i
+    do i=2,2*im+1
+        do k=1,2*km
+            dan(k)=dcmplx(ff(i,k),ff(i,k+2*km))
+        enddo
+
+        call fftc(dan,2*n,-1,2*km)
+
+        do k=1,km
+            phi(i,k+1)=dreal(dan(k))
+        enddo
+        phi(i,1)=phi(i,2)
+        phi(i,km+2)=phi(i,km+1)
+      enddo    ! i
 */
 
-    // i, k: phi(i, k) <- j, ff(i, j)
+    auto computeFFTInverse = [&](const DArray2 &input, DArray2 &output) {
+        CArray1 dan(2 * km);
+        for (int i = 1; i < 2 * im + 1; i++) {
+            for (int k = 0; k < 2 * km; k++) {
+                dan[k] = Complex {input(i, k), input(i, k + 2 * km)};
+            }
+            fftc(dan, 2 * n, -1, 2 * km);
+            for (int k = 1; k < km; k++) {
+                output(i, k + 1) = dan[k].real();
+            }
+            output(i, 0) = output(i, 1);
+            output(i, km + 1) = output(i, km);
+        }
+    };
+
     computeFFTInverse(ff, phi);
 
     doOutput("phi phi", phi);
@@ -380,9 +456,7 @@ c         s=dcos(pi*z/zm)
 
       do i=3,im+1
          do k=2,km
-           dd(i,k)=(((i-0.5d0)*phi(i+1,k)-(i-1.5d0)*phi(i,k))/(i-1.d0)-
-     =       ((i-1.5d0)*phi(i,k)-(i-2.5d0)*phi(i-1,k))/(i-2.d0))/hr**2+
-     =       (phi(i,k+1)-2.d0*phi(i,k)+phi(i,k-1))/hz**2+gg(i,k)
+            dd(i,k)=phi(i,k)-aa1(i,k)
          enddo
       enddo
 */
@@ -390,133 +464,14 @@ c         s=dcos(pi*z/zm)
     auto computeSolutionDifference = [&](DArray2 &first, const DArray2 &second) -> DArray2 {
         DArray2 output(im + 2, km + 2);
         for (int i = 2; i < im + 1; i++) {
-            for (int k = 1; k < km + 1; k++) {
-                output(i, k) = std::abs(getSolution(first, i, k) + second(i, k));
+            for (int k = 1; k < km; k++) {
+                output(i, k) = first(i, k) - second(i, k);
             }
         }
         return output;
     };
 
-    // i, k: dd(i, k) <- phi(i+-1, k+-1)
-    doOutput("proverka2 dd dd", computeSolutionDifference(phi, gg));
-
-/*
-    решение при к=2
-
-      al(1)=1.d0/3.d0
-      be(1)=(2.d0*hr**2/9.d0)*(jf(2,2)+phi(2,2)/hz**2)
-
-      do i=2,2*im
-         s=2.d0*(i-0.5d0)**2/(i*(i-1.d0))-al(i-1)*(i-1.5d0)/(i-1.d0)
-         al(i)=(i+0.5d0)/(i*s)
-         be(i)=(be(i-1)*(i-1.5d0)/(i-1.d0)+
-     =      (hr**2)*(jf(i+1,2)+phi(i+1,2)/hz**2))/s
-      enddo
-
-      aa(2*im+2,2)=0.d0
-      do i=2*im,1,-1
-         aa(i+1,2)=al(i)*aa(i+2,2)+be(i)
-      enddo
-
-    решение во всей области
-
-      do i=2,im+2
-         aa(i,1)=aa(i,2)
-         do k=2,km+1
-            aa(i,k+1)=aa(i,k)+phi(i,k)
-         enddo
-      enddo
-*/
-    auto compSolution = [&](const DArray2 &phi, const DArray2 &jf, DArray2 &aa) {
-        Timer tm;
-        DArray1 al(ims2), be(ims2);
-        al[0] = 1.0 / 3.0;
-        be[0] = (2.0 * hr2 / 9.0) * (jf(1, 1) + phi(1,1) / hz2);
-
-        // i: al(i) <- al(i - 1)
-        // i: be(i) <- be(i - 1), phi(i + 1, 1), jf(i + 1, 1)
-        // i: aa(i + 1, 1) <- al(i), be(i), aa(i + 2, 1)
-        for (int i = 1; i < 2 * im; i++) {
-            double s = 2.0 * (i + 0.5) * (i + 0.5) / ((i + 1) * (i)) - al[i - 1] * (i - 0.5) / (i);
-            al[i] = (i + 1.5) / ((i + 1) * s);
-            be[i] = (be[i - 1] * (i - 0.5) / (i) + hr2 * (jf(i + 1, 1) + phi(i + 1, 1) / hz2)) / s;
-        }
-
-        // i: 2*im-1..0: aa(i + 1, 1) <- al(i), be(i), aa(i + 2, 1)
-        // i: seq
-        aa(2 * im + 1, 1) = 0.0;
-        for (int i = 2 * im - 1; i >= 0; i--) {
-            aa(i + 1, 1) = al[i] * aa(i + 2, 1) + be[i];
-        }
-
-        // i: 1..im+2, k: 1..km+1: aa(i, k + 1) <- aa(i, k), phi(i, k)
-        // i: par, k: seq
-        for (int i = 1; i < im + 2; i++) {
-            aa(i, 0) = aa(i, 1);
-            for (int k = 1; k < km + 1; k++) {
-                aa(i, k + 1) = aa(i, k) + phi(i, k);
-            }
-        }
-        sol_time += tm.time();
-    };
-
-    compSolution(phi, jf, aa);
-
-    doOutput("aa aa", aa);
-
-/*
-    proverka3 решения dd dd
-
-      do i=3,im+1
-         do k=2,km+1
-            dd(i,k)=(((i-0.5d0)*aa(i+1,k)-(i-1.5d0)*aa(i,k))/(i-1.d0)-
-     =        ((i-1.5d0)*aa(i,k)-(i-2.5d0)*aa(i-1,k))/(i-2.d0))/hr**2+
-     =        (aa(i,k+1)-2.d0*aa(i,k)+aa(i,k-1))/hz**2+jf(i,k)
-         enddo
-      enddo
-*/
-
-    // i, k: dd(i, k) <- aa(i+-1, k+-1), jf(i, k)
-    doOutput("dd dd", computeSolutionDifference(aa, jf));
-
-/*
-    вычисление магнитных полей
-
-      do k=1,km+2
-         bz(1,k)=4.d0*aa(2,k)/hr
-         do i=2,im+2
-         bz(i,k)=((i-0.5d0)*aa(i+1,k)-(i-1.5d0)*aa(i,k))/(hr*(i-1.d0))
-         enddo
-      enddo
-
-      do k=1,km+1
-         do i=1,im+2
-            br(i,k)=-(aa(i,k+1)-aa(i,k))/hz
-         enddo
-      enddo
-*/
-
-    auto computeMagnetics = [&](DArray2 &input, DArray2 &bz, DArray2 &br) {
-        Timer tm;
-        for (int k = 0; k < km + 2; k++) {
-            bz(0, k) = 4.0 * input(1, k) / hr;
-            for (int i = 1; i < im + 2; i++) {
-                bz(i, k) = ((i + 0.5) * input(i + 1, k) - (i - 0.5) * input(i, k)) / (hr * (i));
-            }
-        }
-
-        for (int k = 0; k < km + 1; k++) {
-            for (int i = 0; i < im + 2; i++) {
-                br(i, k) = -(input(i, k + 1) - input(i, k)) / hz;
-            }
-        }
-        mag_time += tm.time();
-    };
-
-    // k, i: bz(i, k) <- aa(i, k), aa(i + 1, k)
-    // k, i: br(i, k) <- aa(i, k), aa(i, k + 1)
-    // i: par, k: par
-    computeMagnetics(aa, bz, br);
+    doOutput("proverka2 dd dd", computeSolutionDifference(phi, aa1));
 
     if (file_output) {
         out_lst.close();
