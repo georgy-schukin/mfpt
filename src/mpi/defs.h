@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../common/shadowed_array2d.h"
+#include "shadowed_array2d.h"
 
 #include <vector>
 

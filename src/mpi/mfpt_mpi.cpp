@@ -24,8 +24,6 @@ DArray1 computeSins(size_t size, double coeff) {
 
 int main(int argc, char **argv) {
 /*
-    program brbz003c
-    Тестовая программа.
     Двумерное уравнение Пуассона. Гран.условия 2-го рода.
     Преобразование Фурье и прогонка.
     Предварительно вычисленные синусы.
@@ -60,27 +58,6 @@ int main(int argc, char **argv) {
     const bool file_output = (argc > 3) ? stoi(argv[3]) : FOUT_DEF;
     const bool full_output = (argc > 4) ? stoi(argv[4]) : FULL_OUTPUT_DEF;
 
-/*
-    real*8 br(imp,kmp),bf(imp,kmp),bz(imp,kmp)
-    real*8 sb(2*imp),jb(2*imp),al(2*imp),be(2*imp)
-    real*8 aa(2*imp,kmp),jf(2*imp,kmp),aa1(2*imp,kmp)
-    real*8 gg(2*imp,kmp),bb(2*imp,kmp),ff(2*imp,kmp),phi(2*imp,kmp)
-    real*8 dd(imp,kmp),phi1(2*imp,kmp),ff1(2*imp,kmp),ds(2*kmp)
-*/
-
-    // aa1(2 * im + 2, km + 2)
-    // jf(2 * im + 2, km + 2)
-    // gg(2 * im + 2, km + 1), phi1(2 * im + 2, km + 1)
-    // ds(2 * km)
-    // bb(2 * im + 1, km + 1), ff1(2 * im + 1, km + 1)
-    // al(2 * im + 1), be(2 * im + 1)
-    // ff(2 * im + 2, km)
-    // phi(2 * im + 1, km + 1)
-    // dd(im + 1, km + 1)
-    // aa(2 * im + 2, km + 2)
-    // bz(im + 2, km + 2)
-    // br(im + 2, km + 1)
-
     const size_t ims = im + 2;
     const size_t ims2 = 2 * im + 2;
     const size_t kms = km + 2;
@@ -94,10 +71,10 @@ int main(int argc, char **argv) {
     //DArray1 sb(ims2), jb(ims2), al(ims2), be(ims2);
     DArray2 aa(ims2, km_bsize, 0, 1), jf(ims2, km_bsize, 0, 1), aa1(ims2, km_bsize, 0, 1), phi(ims2, km_bsize, 0, 1);
     DArray2 gg(ims2, km_bsize), bb(ims2, km_bsize), ff(ims2, km_bsize);
-    DArray2 dd(ims, km_bsize), phi1(ims2, km_bsize), ff1(ims2, km_bsize);
-    //DArray1 dsins(2 * kms);
+    DArray2 dd(ims, km_bsize), phi1(ims2, km_bsize), ff1(ims2, km_bsize);    
 
     auto col_type = makeColType(aa);
+    auto vector_sum_op = makeVectorSumOp();
 
     const std::array<int, 4> output_range = {0, 7, 0, 6};
 
@@ -131,8 +108,9 @@ int main(int argc, char **argv) {
     const double zm = km * hz;
     const double hr2 = hr * hr;
     const double hz2 = hz * hz;
+    const double rhr2 = 1.0 / hr2;
+    const double rhz2 = 1.0 / hz2;
 
-    Timer work_timer;
     double comp_time = 0;
     double shadow_time = 0;
     double reduce_time = 0;
@@ -141,30 +119,28 @@ int main(int argc, char **argv) {
     double sol_time = 0;
     double mag_time = 0;
 
-/*
-    тестовое решение
+    // Init functions
 
-      a0=-0.1d0
-      a=1.d0
-      d=1.d0
-      do k=1,km+2
-         z=hz*(k-1.5d0)
-         s=a*z**2*(z-1.5d0*zm)+d
-         s=a0*z**2*(z**2-2.d0*zm**2)+a*z**2*(z-1.5d0*zm)+d
-c         s=dcos(pi*z/zm)
-         do i=2,2*im+2
-            aa1(i,k)=s*(hr*(i-1.5d0)*(2.d0*rm-hr*(i-2.d0)))
-         enddo
-            aa1(1,k)=-aa1(2,k)
-      enddo
-*/
+    auto syncShadows = [col_type, rank, size, &shadow_time](DArray2 &array) {
+        Timer tm;
+        syncShadowsK(array, col_type, rank, size);
+        shadow_time += tm.time();
+    };
 
-    auto initTestSolution = [&](DArray2 &output) {
+    auto syncShadowsNext = [col_type, rank, size, &shadow_time](DArray2 &array) {
+        Timer tm;
+        syncShadowsKNext(array, col_type, rank, size);
+        shadow_time += tm.time();
+    };
+
+    auto initTestSolution = [im, km, hr, hz, rm, zm, &my_km_range, &comp_time](DArray2 &output) {
         Timer tm;
         const double a0 = -0.1;
         const double a = 1.0;
         const double d = 1.0;
-        for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 2); k++) {
+        const auto k_start = my_km_range.localStart(0);
+        const auto k_end = my_km_range.localEnd(km + 2);
+        for (int k = k_start; k < k_end; k++) {
             const auto kk = my_km_range.toGlobal(k);
             const double z = hz * (kk - 0.5);
             const double z2 = z * z;
@@ -177,39 +153,20 @@ c         s=dcos(pi*z/zm)
         comp_time += tm.time();
     };
 
-    // k: 0..km+2, i: 1..2*im+2: aa1(i, k) <- expr
-    initTestSolution(aa1);
-
-/*
-    тестовые токи
-
-      do k=2,km+1
-         s=(1.5d0*aa1(3,k)-4.5d0*aa1(2,k))/hr**2+
-     =        (aa1(2,k+1)-2.d0*aa1(2,k)+aa1(2,k-1))/hz**2
-         jf(2,k)=-s
-         do i=3,2*im+1
-            s=(((i-0.5d0)*aa1(i+1,k)-(i-1.5d0)*aa1(i,k))/(i-1.d0)-
-     =        ((i-1.5d0)*aa1(i,k)-(i-2.5d0)*aa1(i-1,k))/(i-2.d0))/hr**2+
-     =        (aa1(i,k+1)-2.d0*aa1(i,k)+aa1(i,k-1))/hz**2
-            jf(i,k)=-s
-         enddo
-      enddo
-*/
-
-    auto getSolution = [hr2, hz2](const DArray2 &phi, int i, int k) {
-        return (((i + 0.5) * phi(i + 1, k) - (i - 0.5) * phi(i, k)) / (i) -
-                ((i - 0.5) * phi(i, k) - (i - 1.5) * phi(i - 1, k)) / (i - 1.0)) / hr2 +
-               (phi(i, k + 1) - 2.0 * phi(i, k) + phi(i, k - 1)) / hz2;
+    auto getSolution = [hr2, hz2](const DArray2 &input, int i, int k) {
+        return (((i + 0.5) * input(i + 1, k) - (i - 0.5) * input(i, k)) / (i) -
+                ((i - 0.5) * input(i, k) - (i - 1.5) * input(i - 1, k)) / (i - 1.0)) / hr2 +
+               (input(i, k + 1) - 2.0 * input(i, k) + input(i, k - 1)) / hz2;
     };
 
-    auto initTestCurrent = [&](DArray2 &input, DArray2 &output) {
+    auto initTestCurrent = [im, km, rhr2, rhz2, &my_km_range, &syncShadows, &getSolution, &comp_time](DArray2 &input, DArray2 &output) {
+        syncShadows(input);
         Timer tm;
-        syncShadowsK(input, col_type, rank, size);
-        shadow_time += tm.time();
-        tm.reset();
-        for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
-            const double s = (1.5 * input(2, k) - 4.5 * input(1, k)) / hr2 +
-                             (input(1, k + 1) - 2.0 * input(1, k) + input(1, k - 1)) / hz2;
+        const auto k_start = my_km_range.localStart(1);
+        const auto k_end = my_km_range.localEnd(km + 1);
+        for (int k = k_start; k < k_end; k++) {
+            const double s = (1.5 * input(2, k) - 4.5 * input(1, k)) * rhr2 +
+                             (input(1, k + 1) - 2.0 * input(1, k) + input(1, k - 1)) * rhz2;
             output(1, k) = -s;
             for (int i = 2; i < 2 * im + 1; i++) {
                 output(i, k) = -getSolution(input, i, k);
@@ -218,40 +175,19 @@ c         s=dcos(pi*z/zm)
         comp_time += tm.time();
     };
 
-    // k: 1..km+1, i: 2..2*im+1: jf(i, k) <- aa1(i+-1, k+-1)
-    initTestCurrent(aa1, jf);
-
-    gatherAndOutput("aa1 aa1", aa1);
-    gatherAndOutput("jf jf", jf);
-
-/*
-    вычисление разностей
-
-      do i=2,2*im+1
-         do k=2,km
-            gg(i,k)=jf(i,k+1)-jf(i,k)
-            phi1(i,k)=aa1(i,k+1)-aa1(i,k)
-         enddo
-         gg(i,1)=0.d0               !?
-         gg(i,km+1)=0.d0            !?
-         phi1(i,1)=0.d0               !?
-         phi1(i,km+1)=0.d0            !?
-      enddo
-*/
-
     auto setOnK = [&my_km_range](DArray2 &arr, int i, int k, double value) {
         if (my_km_range.hasIndex(k)) {
             arr(i, my_km_range.toLocal(k)) = value;
         }
     };
 
-    auto computeDifference = [&](DArray2 &input, DArray2 &output) {
+    auto computeDifference = [im, km, &my_km_range, &syncShadows, &setOnK, &comp_time](DArray2 &input, DArray2 &output) {
+        syncShadows(input);
         Timer tm;
-        syncShadowsK(input, col_type, rank, size);
-        shadow_time += tm.time();
-        tm.reset();
+        const auto k_start = my_km_range.localStart(1);
+        const auto k_end = my_km_range.localEnd(km);
         for (int i = 1; i < 2 * im + 1; i++) {
-            for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km); k++) {
+            for (int k = k_start; k < k_end; k++) {
                 output(i, k) = input(i, k + 1) - input(i, k);
             }
             setOnK(output, i, 0, 0.0);
@@ -260,54 +196,11 @@ c         s=dcos(pi*z/zm)
         comp_time += tm.time();
     };
 
-    // i: 1..2*im+1, k: 1..km: gg(i, k) <- jf(i, k), jf(i, k + 1)
-    // i: 1..2*im+1, k: 1..km: phi1(i, k) <- aa1(i, k), aa1(i, k + 1)
-    computeDifference(jf, gg);
-    computeDifference(aa1, phi1);
-
-    gatherAndOutput("gg gg", gg);
-
-/*
-    вычисление синусов
-
-      do k=1,2*km
-         ds(k)=dsin(c*k)
-      enddo
-*/
-    const auto dsins = computeSins(2 * km, c);
-
-/*
-    преобразование Фурье для правых частей и для решения
-
-      km2=km/2
-      do i=2,2*im+1
-         do j=2,km
-            s1=0.d0
-            s2=0.d0
-            k1=0
-            do k=2,km
-               k1=k1+j-1
-               if(k1.gt.2*km) k1=k1-2*km
-               s1=s1+gg(i,k)*ds(k1)
-               s2=s2+phi1(i,k)*ds(k1)
-            enddo
-            bb(i,j)=s1/km2
-            ff1(i,j)=s2/km2
-         enddo
-         bb(i,1)=0.d0
-         bb(i,km+1)=0.d0
-         ff1(i,1)=0.d0
-         ff1(i,km+1)=0.d0
-      enddo    ! i
-*/
-
-    auto vector_sum_op = makeVectorSumOp();
-
-    auto computeFFTAux = [&](const DArray2 &input, DArray2 &output, double coeff) {
+    auto computeFFTAux = [im, km, size, &vector_sum_op, &kms_decomp, &my_km_range, &ft_time, &reduce_time, &comp_time](const DArray2 &input, DArray2 &output, const DArray1 &dsins, double coeff) {
         Timer ftm;
-        const auto my_k_start = my_km_range.localStart(1);
-        const auto my_k_end = my_km_range.localEnd(km);
-        const auto my_k_global_start = my_km_range.toGlobal(my_k_start);
+        const auto k_start = my_km_range.localStart(1);
+        const auto k_end = my_km_range.localEnd(km);
+        const auto k_global_start = my_km_range.toGlobal(k_start);
         const auto dsins_size = dsins.size();
         for (int r = 0; r < size; r++) {
             Timer tm;
@@ -318,9 +211,9 @@ c         s=dcos(pi*z/zm)
             for (int i = 1; i < 2 * im + 1; i++) {
                 size_t jj = curr_j_range.toGlobal(j_start);
                 for (int j = j_start; j < j_end; j++, jj++) {
-                    double s = 0.0;                                        
-                    size_t k1 = (my_k_global_start * jj) % dsins_size;
-                    for (int k = my_k_start; k < my_k_end; k++) {
+                    double s = 0.0;
+                    size_t k1 = (k_global_start * jj) % dsins_size;
+                    for (int k = k_start; k < k_end; k++) {
                         if (k1 >= dsins_size) {
                             k1 -= dsins_size;
                         }
@@ -340,48 +233,20 @@ c         s=dcos(pi*z/zm)
         ft_time += ftm.time();
     };
 
-    auto computeFFT = [&computeFFTAux, km](const DArray2 &input, DArray2 &output) {
-        computeFFTAux(input, output, 2.0 / km);
+    auto computeFFT = [&computeFFTAux, km](const DArray2 &input, DArray2 &output, const DArray1 &dsins) {
+        computeFFTAux(input, output, dsins, 2.0 / km);
     };
 
-    auto computeFFTInverse = [&computeFFTAux](const DArray2 &input, DArray2 &output) {
-        computeFFTAux(input, output, 1.0);
+    auto computeFFTInverse = [&computeFFTAux](const DArray2 &input, DArray2 &output, const DArray1 &dsins) {
+        computeFFTAux(input, output, dsins, 1.0);
     };
 
-    // i: 1..2*im+1, j: 1..km: bb(i, j) <- k: 1..km, gg(i, k)
-    // i: 1..2*im+1, j: 1..km: ff1(i, j) <- k: 1..km, phi1(i, k)
-    computeFFT(gg, bb);
-    computeFFT(phi1, ff1);
-
-    gatherAndOutput("bb bb", bb);
-
-/*
-    прогонка по радиусу
-
-      do j=2,km
-         s=9.d0/(2.d0*hr**2)+(4.d0/hz**2)*(dsin(c*(j-1.d0)/2.d0))**2
-         al(2)=3.d0/(2.d0*hr**2*s)
-         be(2)=bb(2,j)/s
-
-         do i=3,2*im+1
-            s=(2.d0*((i-1.5d0)/hr)**2)/((i-1.d0)*(i-2.d0))+
-     =         (4.d0/hz**2)*(dsin(c*(j-1.d0)/2.d0))**2-
-     =         al(i-1)*(i-2.5d0)/((i-2.d0)*hr**2)
-            al(i)=(i-0.5d0)/(s*(i-1.d0)*hr**2)
-            be(i)=(be(i-1)*(i-2.5d0)/((i-2.d0)*hr**2)+bb(i,j))/s
-         enddo
-
-         ff(2*im+2,j)=0.d0
-         do i=2*im+1,2,-1
-            ff(i,j)=al(i)*ff(i+1,j)+be(i)
-         enddo
-      enddo     !   j
-*/
-
-    auto computeProgonka = [&](const DArray2 &input, DArray2 &output) {
+    auto computeProgonka = [im, km, ims2, hr, hz, hr2, hz2, c, &my_km_range, &comp_time, &prog_time](const DArray2 &input, DArray2 &output) {
         Timer tm;
         DArray1 al(ims2), be(ims2);
-        for (int k = my_km_range.localEnd(1); k < my_km_range.localEnd(km); k++) {
+        const auto k_start = my_km_range.localStart(1);
+        const auto k_end = my_km_range.localEnd(km);
+        for (int k = k_start; k < k_end; k++) {
             const auto kk = my_km_range.toGlobal(k);
             const double dsin = sin(c * kk / 2.0);
             double s = 9.0 / (2.0 * hr2) + (4.0 / hz2) * dsin * dsin;
@@ -403,59 +268,12 @@ c         s=dcos(pi*z/zm)
         prog_time += tm.time();
     };
 
-    // k: 1..km, i: 2..2*im+1: al(i) <- al(i - 1)
-    // k: 1..km, i: 2..2*im+1: be(i) <- be(i - 1), bb(i, k)
-    // k: 1..km, i: 2*im..1: ff(i, k) <- al(i), be(i), ff(i + 1, k)
-    // i: seq, k: par
-    computeProgonka(bb, ff);
-
-    gatherAndOutput("ff ff", ff);
-    gatherAndOutput("ff1 ff1", ff1);
-
-/*
-    обратное преобразование Фурье
-
-      do i=2,2*im+1     !    im+1 ?
-         do k=2,km
-            s1=0.d0
-            k1=0
-            do j=2,km
-               k1=k1+k-1
-               if(k1.gt.2*km) k1=k1-2*km
-               s1=s1+ff(i,j)*ds(k1)
-            enddo
-            phi(i,k)=s1
-         enddo
-         phi(i,1)=0.d0
-         phi(i,km+1)=0.d0
-      enddo     !   i
-*/
-
-    // i: 1..2*im+1, k: 1..km: phi(i, k) <- j: 1..km, ff(i, j)
-    computeFFTInverse(ff, phi);
-
-    gatherAndOutput("phi phi", phi);
-    gatherAndOutput("phi1 phi1", phi1);
-
-/*
-    proverka2 решения dd dd
-
-      do i=3,im+1
-         do k=2,km
-           dd(i,k)=(((i-0.5d0)*phi(i+1,k)-(i-1.5d0)*phi(i,k))/(i-1.d0)-
-     =       ((i-1.5d0)*phi(i,k)-(i-2.5d0)*phi(i-1,k))/(i-2.d0))/hr**2+
-     =       (phi(i,k+1)-2.d0*phi(i,k)+phi(i,k-1))/hz**2+gg(i,k)
-         enddo
-      enddo
-*/
-
-    auto computeSolutionDifference = [&](DArray2 &first, const DArray2 &second) -> DArray2 {
+    auto computeSolutionDifference = [im, km, &my_km_range, &syncShadows, &getSolution, &comp_time](DArray2 &first, const DArray2 &second) -> DArray2 {
         Timer tm;
-        syncShadowsK(first, col_type, rank, size);
-        shadow_time += tm.time();
-        tm.reset();
         DArray2 output(im + 2, my_km_range.size());
-        for (int k = my_km_range.localStart(1); k < my_km_range.localEnd(km + 1); k++) {
+        const auto k_start = my_km_range.localStart(1);
+        const auto k_end = my_km_range.localEnd(km + 1);
+        for (int k = k_start; k < k_end; k++) {
             for (int i = 2; i < im + 1; i++) {
                 output(i, k) = std::abs(getSolution(first, i, k) + second(i, k));
             }
@@ -464,39 +282,8 @@ c         s=dcos(pi*z/zm)
         return output;
     };
 
-    // i: 2..im+1, k: 1..km: dd(i, k) <- phi(i+-1, k+-1), gg(i, k)
-    gatherAndOutput("proverka2 dd dd", computeSolutionDifference(phi, gg));
-
-/*
-    решение при к=2
-
-      al(1)=1.d0/3.d0
-      be(1)=(2.d0*hr**2/9.d0)*(jf(2,2)+phi(2,2)/hz**2)
-
-      do i=2,2*im
-         s=2.d0*(i-0.5d0)**2/(i*(i-1.d0))-al(i-1)*(i-1.5d0)/(i-1.d0)
-         al(i)=(i+0.5d0)/(i*s)
-         be(i)=(be(i-1)*(i-1.5d0)/(i-1.d0)+
-     =      (hr**2)*(jf(i+1,2)+phi(i+1,2)/hz**2))/s
-      enddo
-
-      aa(2*im+2,2)=0.d0
-      do i=2*im,1,-1
-         aa(i+1,2)=al(i)*aa(i+2,2)+be(i)
-      enddo
-
-    решение во всей области
-
-      do i=2,im+2
-         aa(i,1)=aa(i,2)
-         do k=2,km+1
-            aa(i,k+1)=aa(i,k)+phi(i,k)
-         enddo
-      enddo
-*/
-
     // TODO: parallelize
-    auto compSolution = [&](const DArray2 &phi, const DArray2 &jf, DArray2 &aa) {
+    auto compSolution = [im, km, ims2, hr, hz, hr2, hz2, &comp_time, &sol_time](const DArray2 &phi, const DArray2 &jf, DArray2 &aa) {
         Timer tm;
         DArray1 al(ims2), be(ims2);
         al[0] = 1.0 / 3.0;
@@ -530,6 +317,78 @@ c         s=dcos(pi*z/zm)
         sol_time += tm.time();
     };
 
+    auto computeMagnetics = [im, km, hr, hz, &my_km_range, &syncShadowsNext, &comp_time, &mag_time](DArray2 &input, DArray2 &bz, DArray2 &br) {
+        Timer mtm;
+        Timer tm;
+        const int k_start = my_km_range.localStart(0);
+        const int k_end = my_km_range.localEnd(km + 2);
+        for (int k = k_start; k < k_end; k++) {
+            bz(0, k) = 4.0 * input(1, k) / hr;
+            for (int i = 1; i < im + 2; i++) {
+                bz(i, k) = ((i + 0.5) * input(i + 1, k) - (i - 0.5) * input(i, k)) / (hr * (i));
+            }
+        }
+        comp_time += tm.time();
+
+        syncShadowsNext(input);
+        tm.reset();
+        const int k_end2 = my_km_range.localEnd(km + 1);
+        for (int k = k_start; k < k_end2; k++) {
+            for (int i = 0; i < im + 2; i++) {
+                br(i, k) = -(input(i, k + 1) - input(i, k)) / hz;
+            }
+        }
+        comp_time += tm.time();
+        mag_time += mtm.time();
+    };
+
+    // The main program
+
+    Timer work_timer;
+
+    // k: 0..km+2, i: 1..2*im+2: aa1(i, k) <- expr
+    initTestSolution(aa1);
+
+    // k: 1..km+1, i: 2..2*im+1: jf(i, k) <- aa1(i+-1, k+-1)
+    initTestCurrent(aa1, jf);
+
+    gatherAndOutput("aa1 aa1", aa1);
+    gatherAndOutput("jf jf", jf);
+
+    // i: 1..2*im+1, k: 1..km: gg(i, k) <- jf(i, k), jf(i, k + 1)
+    // i: 1..2*im+1, k: 1..km: phi1(i, k) <- aa1(i, k), aa1(i, k + 1)
+    computeDifference(jf, gg);
+    computeDifference(aa1, phi1);
+
+    gatherAndOutput("gg gg", gg);
+
+    const auto dsins = computeSins(2 * km, c);
+
+    // i: 1..2*im+1, j: 1..km: bb(i, j) <- k: 1..km, gg(i, k)
+    // i: 1..2*im+1, j: 1..km: ff1(i, j) <- k: 1..km, phi1(i, k)
+    computeFFT(gg, bb, dsins);
+    computeFFT(phi1, ff1, dsins);
+
+    gatherAndOutput("bb bb", bb);
+
+    // k: 1..km, i: 2..2*im+1: al(i) <- al(i - 1)
+    // k: 1..km, i: 2..2*im+1: be(i) <- be(i - 1), bb(i, k)
+    // k: 1..km, i: 2*im..1: ff(i, k) <- al(i), be(i), ff(i + 1, k)
+    // i: seq, k: par
+    computeProgonka(bb, ff);
+
+    gatherAndOutput("ff ff", ff);
+    gatherAndOutput("ff1 ff1", ff1);
+
+    // i: 1..2*im+1, k: 1..km: phi(i, k) <- j: 1..km, ff(i, j)
+    computeFFTInverse(ff, phi, dsins);
+
+    gatherAndOutput("phi phi", phi);
+    gatherAndOutput("phi1 phi1", phi1);
+
+    // i: 2..im+1, k: 1..km: dd(i, k) <- phi(i+-1, k+-1), gg(i, k)
+    gatherAndOutput("proverka2 dd dd", computeSolutionDifference(phi, gg));
+
     // Temporary fix: compute solution on a root(0) node
     auto phi_global = gatherArrayK(phi, kms_decomp, rank, size);
     auto jf_global = gatherArrayK(jf, kms_decomp, rank, size);
@@ -542,74 +401,22 @@ c         s=dcos(pi*z/zm)
 
     outputArray("aa aa", aa_global);
 
-/*
-    proverka3 решения dd dd
-
-      do i=3,im+1
-         do k=2,km+1
-            dd(i,k)=(((i-0.5d0)*aa(i+1,k)-(i-1.5d0)*aa(i,k))/(i-1.d0)-
-     =        ((i-1.5d0)*aa(i,k)-(i-2.5d0)*aa(i-1,k))/(i-2.d0))/hr**2+
-     =        (aa(i,k+1)-2.d0*aa(i,k)+aa(i,k-1))/hz**2+jf(i,k)
-         enddo
-      enddo
-*/
-
     // i: 2..im+1, k: 1..km+1: dd(i, k) <- aa(i+-1, k+-1), jf(i, k)
     gatherAndOutput("dd dd", computeSolutionDifference(aa, jf));
-
-/*
-    вычисление магнитных полей
-
-      do k=1,km+2
-         bz(1,k)=4.d0*aa(2,k)/hr
-         do i=2,im+2
-         bz(i,k)=((i-0.5d0)*aa(i+1,k)-(i-1.5d0)*aa(i,k))/(hr*(i-1.d0))
-         enddo
-      enddo
-
-      do k=1,km+1
-         do i=1,im+2
-            br(i,k)=-(aa(i,k+1)-aa(i,k))/hz
-         enddo
-      enddo
-*/
-    auto computeMagnetics = [&](DArray2 &input, DArray2 &bz, DArray2 &br) {
-        Timer mtm;
-        Timer tm;
-        for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 2); k++) {
-            bz(0, k) = 4.0 * input(1, k) / hr;
-            for (int i = 1; i < im + 2; i++) {
-                bz(i, k) = ((i + 0.5) * input(i + 1, k) - (i - 0.5) * input(i, k)) / (hr * (i));
-            }
-        }
-        comp_time += tm.time();
-
-        tm.reset();
-        syncShadowsKNext(input, col_type, rank, size);
-        shadow_time += tm.time();
-        tm.reset();
-        for (int k = my_km_range.localStart(0); k < my_km_range.localEnd(km + 1); k++) {
-            for (int i = 0; i < im + 2; i++) {
-                br(i, k) = -(input(i, k + 1) - input(i, k)) / hz;
-            }
-        }
-        comp_time += tm.time();
-        mag_time += mtm.time();
-    };
 
     // k: 0..km+2, i: 1..im+2: bz(i, k) <- aa(i, k), aa(i + 1, k)
     // k: 0..km+1, i: 0..im+2: br(i, k) <- aa(i, k), aa(i, k + 1)
     // i: par, k: par
     computeMagnetics(aa, bz, br);
 
-    if (file_output && rank == 0) {
-        out_lst.close();
-    }
-
     auto work_time = work_timer.time();
 
     double time = 0;
     MPI_Reduce(&work_time, &time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+
+    if (file_output && rank == 0) {
+        out_lst.close();
+    }
 
     std::ostringstream out;
 
