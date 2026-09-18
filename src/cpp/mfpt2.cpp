@@ -83,23 +83,23 @@ void fftc(CArray1 &a, int n, int isi, int np) {
             j -= m;
             m /= 2;
         } while (m >= 1);
-        j = j + m;
+        j += m;
     }
     int mm = 1;
     while (mm < nn) {
-        int ii = 2 * mm;
-        double th = pi2 / (n * isi >= 0 ? std::abs(ii) : -std::abs(ii));
+        const int ii = 2 * mm;
+        const double th = pi2 / (n * isi >= 0 ? std::abs(ii) : -std::abs(ii));
         const auto sin_th = std::sin(th);
         const auto sin_th_d2 = std::sin(th * 0.5);
         Complex w1 {-2.0 * sin_th_d2 * sin_th_d2, sin_th};
         Complex w = 1.0;
         for (int m = 1; m <= mm; m++) {
             for (int i = m; i <= nn; i += ii) {
-                const auto t = w * a[i + mm - 1];
+                const Complex t = w * a[i + mm - 1];
                 a[i + mm - 1] = a[i - 1] - t;
                 a[i - 1] += t;
             }
-            w = w1 * w + w;
+            w += w1 * w;
         }
         mm = ii;
     }
@@ -111,8 +111,8 @@ int main(int argc, char **argv) {
     Быстрое преобразование Фурье и прогонка.
 */
 
-    const int IM_DEF = 20;
-    const int N_DEF = 6;
+    const int IM_DEF = 80;
+    const int N_DEF = 7;
     const int FOUT_DEF = 1;
     const int FULL_OUTPUT_DEF = 0;
 
@@ -135,7 +135,7 @@ int main(int argc, char **argv) {
     const bool file_output = (argc > 3) ? stoi(argv[3]) : FOUT_DEF;
     const bool full_output = (argc > 4) ? stoi(argv[4]) : FULL_OUTPUT_DEF;
 
-/*      
+/*
     integer imp,kmp,im,km,i,k,n,k1,km2,j,k2,i1,m,nj,j1
     parameter(im=20,n=6,km=2**n,imp=im+2,kmp=km+2)
     real*8 br(imp,kmp),bf(imp,kmp),bz(imp,kmp)
@@ -149,19 +149,14 @@ int main(int argc, char **argv) {
     real*8 bb(2*imp,4*km),ff(2*imp,4*km),ff1(2*imp,4*km)
 */
 
-    const size_t ims = im + 2;
-    const size_t ims2 = 2 * im + 2;
-    const size_t kms = km + 2;
+    const size_t imp = im + 2;
+    const size_t imp2 = 2 * imp;
+    const size_t kmp = km + 2;
 
-    DArray2 br(ims, kms), bf(ims, kms), bz(ims, kms);    
-    DArray2 aa(ims2, kms), jf(ims2, kms), aa1(ims2, kms);
-    DArray2 gg(ims2, kms), bb(ims2, kms), ff(ims2, kms), phi(ims2, kms);
-    DArray2 dd(ims, kms), phi1(ims2, kms), ff1(ims2, kms);
-
-    ofstream out_lst;
-    if (file_output) {
-        out_lst.open("output2.lst");
-    }
+    //DArray2 br(ims, kms), bf(ims, kms), bz(ims, kms);
+    DArray2 aa(imp2, kmp), jf(imp2, kmp), aa1(imp2, kmp);
+    DArray2 gg(imp2, kmp), bb(imp2, 4 * km), ff(imp2, 4 * km), phi(imp2, 4 * km);
+    //DArray2 dd(ims, kms), phi1(ims2, kms), ff1(ims2, kms);
 
 /*
     pi=3.14159265358979d0
@@ -185,6 +180,11 @@ int main(int argc, char **argv) {
 
     const std::array<int, 4> output_range = {0, 7, 0, 6};
 
+    ofstream out_lst;
+    if (file_output) {
+        out_lst.open("output2.lst");
+    }
+
     auto doOutput = [&](const std::string &header, const DArray2 &data) {
         if (file_output) {
             if (full_output) {
@@ -195,12 +195,22 @@ int main(int argc, char **argv) {
         }
     };
 
+    auto doOutputRange = [&](const std::string &header, const DArray2 &data, const std::array<int, 4> &range) {
+        if (file_output) {
+            if (full_output) {
+                output(header, data, out_lst);
+            } else {
+                output(header, data, range, out_lst);
+            }
+        }
+    };
+
     double ft_time = 0;
     double prog_time = 0;
-    double sol_time = 0;
-    double mag_time = 0;
+    //double sol_time = 0;
+    //double mag_time = 0;
 
-    Timer full_time;
+    // Init functions
 
 /*
     тестовое решение
@@ -224,10 +234,10 @@ int main(int argc, char **argv) {
          enddo
 */
 
-    auto initTestSolution = [&](DArray2 &output) {
+    auto initTestSolution = [im, km, zm, hz, hr2](DArray2 &output, int m) {
         const double a0 = -0.1;
         const double a = 1e-3;
-        const double d = 1.0 + 1e-5;
+        const double d = 1.0 + 1e-5 * m;
         for (int k = 0; k < km + 2; k++) {
             const double z = hz * (k + 1 - 1.5);
             const double z2 = z * z;
@@ -243,8 +253,6 @@ int main(int argc, char **argv) {
             output(i, km + 1) = output(i, km);
         }
     };
-
-    initTestSolution(aa1);
 
 /*
     тестовые токи
@@ -262,28 +270,22 @@ int main(int argc, char **argv) {
       enddo
 */
 
-    auto getSolution = [rhr2, rhz2](const DArray2 &phi, int i, int k) {
-        return (((i + 0.5) * phi(i + 1, k) - (i - 0.5) * phi(i, k)) / (i) -
-                ((i - 0.5) * phi(i, k) - (i - 1.5) * phi(i - 1, k)) * rhr2 / (i - 1.0)) +
-               (phi(i, k + 1) - 2.0 * phi(i, k) + phi(i, k - 1)) * rhz2;
+    auto getSolution = [rhr2, rhz2](const DArray2 &input, int i, int k) {
+        return (((i + 0.5) * input(i + 1, k) - (i - 0.5) * input(i, k)) / (i) -
+                ((i - 0.5) * input(i, k) - (i - 1.5) * input(i - 1, k)) / (i - 1.0)) * rhr2 +
+               (input(i, k + 1) - 2.0 * input(i, k) + input(i, k - 1)) * rhz2;
     };
 
-    auto initTestCurrent = [&](DArray2 &input, DArray2 &output) {
+    auto initTestCurrent = [im, km, rhr2, rhz2, &getSolution](const DArray2 &input, DArray2 &output) {
         for (int k = 1; k < km + 1; k++) {
             double s = (1.5 * input(2, k) - 4.5 * input(1, k)) * rhr2 +
                        (input(1, k + 1) - 2.0 * input(1, k) + input(1, k - 1)) * rhz2;
             output(1, k) = -s;
             for (int i = 2; i < 2 * im + 1; i++) {
-                output(i, k) = -getSolution(aa1, i, k);
+                output(i, k) = -getSolution(input, i, k);
             }
         }
     };
-
-    // k, i: jf(i, k) <- aa1(i+-1, k+-1)
-    initTestCurrent(aa1, jf);
-
-    doOutput("aa1 aa1", aa1);
-    doOutput("jf jf", jf);
 
 /*
     вычисление разностей
@@ -310,13 +312,6 @@ int main(int argc, char **argv) {
         }
     };
 
-    // i, k: gg(i, k) <- jf(i, k), jf(i, k + 1)
-    // i, k: phi(i, k) <- aa1(i, k), aa1(i, k + 1)
-    computeDifference(jf, gg);
-    computeDifference(aa1, phi1);
-
-    doOutput("gg gg", gg);
-
 /*
     преобразование Фурье для правых частей
 
@@ -335,24 +330,22 @@ int main(int argc, char **argv) {
     enddo    ! i
 */
 
-    auto computeFFT = [&](const DArray2 &input, DArray2 &output) {
+    auto computeFFT = [im, km, n, &ft_time](const DArray2 &input, DArray2 &output) {
+        Timer tm;
         CArray1 dan(2 * km);
         for (int i = 1; i < 2 * im + 1; i++) {
             for (int k = 0; k < km; k++) {
                 dan[k] = Complex {input(i, k + 1), 0.0};
-                dan[k + km] = Complex {input(i, km + 2 - k), 0.0};
+                dan[k + km] = Complex {input(i, km - k), 0.0};
             }
             fftc(dan, 2 * n, 1, 2 * km);
-            for (int k = 1; k < 2 * km; k++) {
+            for (int k = 0; k < 2 * km; k++) {
                 output(i, k) = dan[k].real();
                 output(i, 2 * km + k) = dan[k].imag();
             }
         }
+        ft_time += tm.time();
     };
-
-    computeFFT(jf, bb);
-
-    doOutput("bb bb", bb);
 
 /*
     прогонка по радиусу
@@ -382,11 +375,12 @@ int main(int argc, char **argv) {
     enddo     !   j
 */
 
-    auto computeProgonka = [&](const DArray2 &input, DArray2 &output) {
+    auto computeProgonka = [im, km, imp2, hr, hr2, hz, hz2, c, &prog_time](const DArray2 &input, DArray2 &output) {
         Timer tm;
-        DArray1 al(ims2), be(ims2);
-        for (int k = 1; k < km; k++) {
-            const double dsin = sin(c * k / 2.0);
+        DArray1 al(imp2), be(imp2);
+        for (int k = 0; k < 4 * km; k++) {
+            const int k1 = (k >= 2 * km ? k - 2 * km : k);
+            const double dsin = sin(c * k1);
             double s = 9.0 / (2.0 * hr2) + (4.0 / hz2) * dsin * dsin;
             al[1] = 3.0 / (2.0 * hr2 * s);
             be[1] = input(1, k) / s;
@@ -404,14 +398,6 @@ int main(int argc, char **argv) {
         }
         prog_time += tm.time();
     };
-
-    // j, i: al(i) <- al(i - 1)
-    // j, i: be(i) <- be(i - 1)
-    // j, i: ff(i, j) <- al(i), be(i), ff(i + 1, j)
-    computeProgonka(bb, ff);
-
-    doOutput("ff ff", ff);
-    doOutput("ff1 ff1", ff1);
 
 /*
     обратное преобразование Фурье
@@ -432,24 +418,21 @@ int main(int argc, char **argv) {
 */
 
     auto computeFFTInverse = [&](const DArray2 &input, DArray2 &output) {
+        Timer tm;
         CArray1 dan(2 * km);
         for (int i = 1; i < 2 * im + 1; i++) {
             for (int k = 0; k < 2 * km; k++) {
                 dan[k] = Complex {input(i, k), input(i, k + 2 * km)};
             }
             fftc(dan, 2 * n, -1, 2 * km);
-            for (int k = 1; k < km; k++) {
+            for (int k = 0; k < km; k++) {
                 output(i, k + 1) = dan[k].real();
             }
             output(i, 0) = output(i, 1);
             output(i, km + 1) = output(i, km);
         }
+        ft_time += tm.time();
     };
-
-    computeFFTInverse(ff, phi);
-
-    doOutput("phi phi", phi);
-    doOutput("phi1 phi1", phi1);
 
 /*
     proverka2 решения dd dd
@@ -471,18 +454,44 @@ int main(int argc, char **argv) {
         return output;
     };
 
-    doOutput("proverka2 dd dd", computeSolutionDifference(phi, aa1));
+    // The main program's body
+
+    Timer full_time;
+
+    for (int m = 1; m <= 1000; m++) {
+        initTestSolution(aa1, m);
+        initTestCurrent(aa1, jf);
+        //doOutput("aa1 aa1", aa1);
+        //doOutput("jf jf", jf);
+
+        //computeDifference(jf, gg);
+        //computeDifference(aa1, phi1);
+        //doOutput("gg gg", gg);
+
+        computeFFT(jf, bb);
+        //doOutput("bb bb", bb);
+
+        computeProgonka(bb, ff);
+        //doOutput("ff ff", ff);
+        //doOutput("ff1 ff1", ff1);
+
+        computeFFTInverse(ff, phi);
+        //doOutput("phi phi", phi);
+        //doOutput("phi1 phi1", phi1);
+    }
+
+    doOutputRange("phi phi", phi, {0, 7, 0, km + 2});
+    doOutput("proverka 2 dd dd", computeSolutionDifference(phi, aa1));
 
     if (file_output) {
         out_lst.close();
     }
 
     auto time = full_time.time();
+    cout << "Im: " << im << ", Km: " << km << endl;
     cout << "TIME: " << time << endl;
     cout << "FT: " << ft_time <<
-        ", Prog: " << prog_time <<
-        ", Sol: " << sol_time <<
-        ", Mag: " << mag_time << endl;
+        ", Prog: " << prog_time << endl;
 
     return 0;
 }

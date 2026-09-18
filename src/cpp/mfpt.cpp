@@ -23,8 +23,6 @@ DArray1 computeSins(size_t size, double coeff) {
 
 int main(int argc, char **argv) {
 /*
-    program brbz003c
-    Тестовая программа.
     Двумерное уравнение Пуассона. Гран.условия 2-го рода.
     Преобразование Фурье и прогонка.
     Предварительно вычисленные синусы.
@@ -523,6 +521,7 @@ c         s=dcos(pi*z/zm)
     }
 
     auto time = full_time.time();
+    cout << "Im: " << im << ", Km: " << km << endl;
     cout << "TIME: " << time << endl;
     cout << "FT: " << ft_time <<
         ", Prog: " << prog_time <<

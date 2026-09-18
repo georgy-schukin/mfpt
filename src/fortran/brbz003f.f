@@ -46,8 +46,8 @@ c      eps=1.d-10
       hz=zm/km
 c      po=2.d0
 c      b0=20.d0
-      write(25,*) 'im,km=',im,km
-      write(25,*)
+      write(*,*) 'im,km=',im,km
+      write(*,*)
 
       call cpu_time(t1)
 
@@ -72,6 +72,7 @@ c
             aa1(i,1)=aa1(i,2)
             aa1(i,km+2)=aa1(i,km+1)
          enddo
+       
 c      write(25,*)
 c      write(25,*) 'aa1 aa1'
 c      call pr21(aa1,1,7,1,km+2)
@@ -98,12 +99,13 @@ c=======================================================================
 c
 c     преобразование Фурье для правых частей 
 c
+
       do i=2,2*im+1
 
          do k=1,km
             dan(k)=dcmplx(jf(i,k+1),0.d0)
             dan(k+km)=dcmplx(jf(i,km+2-k),0.d0)
-         enddo
+         enddo         
 
          call fftc(dan,2*n,1,2*km)
 
@@ -185,9 +187,9 @@ c         enddo
 
       call cpu_time(t2)
 
-      write(25,*) 't1:',t1 
-      write(25,*) 't2:',t2 
-      write(25,*) 't2-t1=',t2-t1
+      write(*,*) 't1:',t1 
+      write(*,*) 't2:',t2 
+      write(*,*) 't2-t1=',t2-t1
 
 
 c      write(25,*)
@@ -283,7 +285,7 @@ c      th= pi2/dsign(ii,n*isi)
       a(i+mm)=a(i)-t
       a(i)=a(i)+t
     5 continue
-      w=w1*w+w
+      w=w1*w+w      
     6 continue
       mm=ii
       go to 4
@@ -310,7 +312,7 @@ c  902 format(7x,8(i3,9x))
     3 v(i+1-n1)=b(i,l)
       write(25,903) l02,(v(i),i=1,n3)
 c  903 format(i3,1x,8e12.4)
-  903 format(i3,1x,8f9.3)
+  903 format(i3,1x,8f10.3)
     4 continue
       if(n2.eq.m1) goto 1
       n1=n1+8
@@ -341,7 +343,7 @@ c  902 format(7x,8(i3,9x))
     3 v(i+1-n1)=b(i,l)
       write(25,903) l02,(v(i),i=1,n3)
 c  903 format(i3,1x,8e12.4)
-  903 format(i3,1x,8f9.3)
+  903 format(i3,1x,8f10.3)
     4 continue
       if(n2.eq.m1) goto 1
       n1=n1+8
@@ -372,7 +374,7 @@ c  902 format(7x,8(i3,9x))
     3 v(i+1-n1)=b(i,l)
       write(25,903) l02,(v(i),i=1,n3)
 c  903 format(i3,1x,8e12.4)
-  903 format(i3,1x,8f9.3)
+  903 format(i3,1x,8f10.3)
     4 continue
       if(n2.eq.m1) goto 1
       n1=n1+8
