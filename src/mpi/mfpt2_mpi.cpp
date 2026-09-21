@@ -1,6 +1,10 @@
 #include "defs.h"
+#include "block_decomp.h"
+#include "comm_util.h"
 #include "../common/output.h"
 #include "../common/timer.h"
+
+#include <mpi.h>
 
 #include <vector>
 #include <array>
@@ -13,50 +17,6 @@
 #include <complex>
 
 using namespace std;
-
-/*
-      subroutine fftc(a,n,isi,np)
-      implicit real*8(a-h,o-z)
-      complex*16 a(np),t,w,w1
-
-      do 7 i=1,np
-      if(isi.gt.0) a(i)=a(i)/np
-    7 continue
-
-      pi2=8.d-0*datan(1.d-0)
-      nn=np
-      j=1
-
-      do 3 i=1,nn
-      if(i.ge.j) go to 1
-      t=a(j)
-      a(j)=a(i)
-      a(i)=t
-    1 m=nn/2
-    2 if(j.le.m) go to 3
-      j=j-m
-      m=m/2
-      if(m.ge.1) go to 2
-    3 j=j+m
-
-      mm=1
-    4 if(mm.ge.nn) return
-      ii=2*mm
-      th= pi2/isign(ii,n*isi)
-      w1=dcmplx(-2.0 d-0*dsin(th/2)**2,dsin(th))
-      w=1
-      do 6 m=1,mm
-      do 5 i=m,nn,ii
-      t=w*a(i+mm)
-      a(i+mm)=a(i)-t
-      a(i)=a(i)+t
-    5 continue
-      w=w1*w+w
-    6 continue
-      mm=ii
-      go to 4
-      end
- */
 
 using Complex = std::complex<double>;
 using CArray1 = std::vector<Complex>;
@@ -116,6 +76,12 @@ int main(int argc, char **argv) {
     const int FOUT_DEF = 1;
     const int FULL_OUTPUT_DEF = 0;
 
+    int rank, size;
+
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
     if (argc > 1) {
         const auto s = string(argv[1]);
         if (s == "-h" || s == "--help") {
@@ -135,37 +101,20 @@ int main(int argc, char **argv) {
     const bool file_output = (argc > 3) ? stoi(argv[3]) : FOUT_DEF;
     const bool full_output = (argc > 4) ? stoi(argv[4]) : FULL_OUTPUT_DEF;
 
-/*
-    integer imp,kmp,im,km,i,k,n,k1,km2,j,k2,i1,m,nj,j1
-    parameter(im=20,n=6,km=2**n,imp=im+2,kmp=km+2)
-    real*8 br(imp,kmp),bf(imp,kmp),bz(imp,kmp)
-    real*8 al(2*imp),be(2*imp)
-    real*8 aa(2*imp,kmp),jf(2*imp,kmp),aa1(2*imp,kmp)
-    real*8 gg(2*imp,kmp),phi(2*imp,kmp),phi2(2*imp,kmp)
-    real*8 dd(imp,kmp),phi1(2*imp,kmp)
-    real*8 hr,hz,s,s1,s2,s3,eps,b0,pi,c,s4,t1,t2
-    real*8 alpha, delta,r,f,rm,zm,a,d,z,a0
-    complex*16 dan(2*km)
-    real*8 bb(2*imp,4*km),ff(2*imp,4*km),ff1(2*imp,4*km)
-*/
-
     const size_t imp = im + 2;
     const size_t imp2 = 2 * imp;
     const size_t kmp = km + 2;
 
-    //DArray2 br(ims, kms), bf(ims, kms), bz(ims, kms);
-    DArray2 aa(imp2, kmp), jf(imp2, kmp), aa1(imp2, kmp);
-    DArray2 gg(imp2, kmp), bb(imp2, 4 * km), ff(imp2, 4 * km), phi(imp2, kmp);
-    //DArray2 dd(ims, kms), phi1(ims2, kms), ff1(ims2, kms);
+    BlockDecomposition km_decomp(kmp, size);
+    const size_t km_bsize = km_decomp.getBlockSize(rank);
+    const auto my_km_range = km_decomp.getRange(rank);
 
-/*
-    pi=3.14159265358979d0
-    c=0.5d0*pi/km
-    rm=4.d0
-    zm=12.d0
-    hr=rm/im
-    hz=zm/km
-*/
+    BlockDecomposition km4_decomp(4 * km, size);
+    const size_t km4_bsize = km4_decomp.getBlockSize(rank);
+    const auto my_km4_range = km4_decomp.getRange(rank);
+
+    DArray2 jf(imp2, km_bsize), aa1(imp2, km_bsize);
+    DArray2 bb(imp2, km4_bsize), ff(imp2, km4_bsize), phi(imp2, km_bsize);
 
     const double pi = 3.14159265358979;
     const double c = 0.5 * pi / km;
@@ -181,22 +130,12 @@ int main(int argc, char **argv) {
     const std::array<int, 4> output_range = {0, 7, 0, 6};
 
     ofstream out_lst;
-    if (file_output) {
+    if (file_output && rank == 0) {
         out_lst.open("output2.lst");
     }
 
-    auto doOutput = [&](const std::string &header, const DArray2 &data) {
-        if (file_output) {
-            if (full_output) {
-                output(header, data, out_lst);
-            } else {
-                output(header, data, output_range, out_lst);
-            }
-        }
-    };
-
-    auto doOutputRange = [&](const std::string &header, const DArray2 &data, const std::array<int, 4> &range) {
-        if (file_output) {
+    auto outputArray = [rank, full_output, &out_lst](const std::string &header, const DArray2 &data, const std::array<int, 4> &range) {
+        if (rank == 0) {
             if (full_output) {
                 output(header, data, out_lst);
             } else {
@@ -205,41 +144,38 @@ int main(int argc, char **argv) {
         }
     };
 
+    auto gatherAndOutput = [rank, size, file_output, &outputArray](const std::string &header, const DArray2 &local_data, const BlockDecomposition &decomp, const std::array<int, 4> &range) {
+        if (file_output) {
+            const auto arr = gatherArrayK(local_data, decomp, rank, size);
+            outputArray(header, arr, range);
+        }
+    };
+
     double ft_time = 0;
     double prog_time = 0;
-    //double sol_time = 0;
-    //double mag_time = 0;
+    double comp_time = 0;
+    double shadow_time = 0;
+
+    auto syncShadows = [rank, size, &shadow_time](DArray2 &array) {
+        Timer tm;
+        auto col_type = makeColType(array);
+        syncShadowsK(array, col_type, rank, size);
+        MPI_Type_free(&col_type);
+        shadow_time += tm.time();
+    };
 
     // Init functions
 
-/*
-    тестовое решение
-
-      a0=-0.1d0
-      a=1.d-3
-      d=1.d0+1.d-5*m
-
-      do k=1,km+2
-         z=hz*(k-1.5d0)
-         s=a*z**2*(z-1.5d0-zm)+d
-         do i=2,2*im+2
-            aa1(i,k)=s*(i-2*im-2.d0)*(i-1.5d0)*hr**2
-         enddo
-            aa1(1,k)=-aa1(2,k)
-            aa1(2*im+2,k)=0.d0
-      enddo
-         do i=1,2*im+2
-            aa1(i,1)=aa1(i,2)
-            aa1(i,km+2)=aa1(i,km+1)
-         enddo
-*/
-
-    auto initTestSolution = [im, km, zm, hz, hr2](DArray2 &output, int m) {
+    auto initTestSolution = [im, km, zm, hz, hr2, &my_km_range, &comp_time](DArray2 &output, int m) {
+        Timer tm;
         const double a0 = -0.1;
         const double a = 1e-3;
         const double d = 1.0 + 1e-5 * m;
-        for (int k = 0; k < km + 2; k++) {
-            const double z = hz * (k + 1 - 1.5);
+        const auto k_start = my_km_range.localStart(0);
+        const auto k_end = my_km_range.localEnd(km + 2);
+        for (int k = k_start; k < k_end; k++) {
+            const auto kk = my_km_range.toGlobal(k);
+            const double z = hz * (kk + 1 - 1.5);
             const double z2 = z * z;
             const double s = a * z2 * (z - 1.5 - zm) + d;
             for (int i = 1; i < 2 * im + 2; i++) {
@@ -248,27 +184,22 @@ int main(int argc, char **argv) {
             output(0, k) = -output(1, k);
             output(2 * im + 1, k) = 0.0;
         }
-        for (int i = 0; i < 2 * im + 2; i++) {
-            output(i, 0) = output(i, 1);
-            output(i, km + 1) = output(i, km);
+        if (my_km_range.hasIndex(0)) {
+            const auto dst_loc = my_km_range.toLocal(0);
+            const auto src_loc = my_km_range.toLocal(1);
+            for (int i = 0; i < 2 * im + 2; i++) {
+                output(i, dst_loc) = output(i, src_loc);
+            }
         }
+        if (my_km_range.hasIndex(km + 1)) {
+            const auto dst_loc = my_km_range.toLocal(km + 1);
+            const auto src_loc = my_km_range.toLocal(km);
+            for (int i = 0; i < 2 * im + 2; i++) {
+                output(i, dst_loc) = output(i, src_loc);
+            }
+        }
+        comp_time += tm.time();
     };
-
-/*
-    тестовые токи
-
-      do k=2,km+1
-         s=(1.5d0*aa1(3,k)-4.5d0*aa1(2,k))/hr**2+
-     =        (aa1(2,k+1)-2.d0*aa1(2,k)+aa1(2,k-1))/hz**2
-         jf(2,k)=-s
-         do i=3,2*im+1
-            s=(((i-0.5d0)*aa1(i+1,k)-(i-1.5d0)*aa1(i,k))/(i-1.d0)-
-     =       ((i-1.5d0)*aa1(i,k)-(i-2.5d0)*aa1(i-1,k))/(i-2.d0))/hr**2+
-     =        (aa1(i,k+1)-2.d0*aa1(i,k)+aa1(i,k-1))/hz**2
-            jf(i,k)=-s
-         enddo
-      enddo
-*/
 
     auto getSolution = [rhr2, rhz2](const DArray2 &input, int i, int k) {
         return (((i + 0.5) * input(i + 1, k) - (i - 0.5) * input(i, k)) / (i) -
@@ -276,8 +207,12 @@ int main(int argc, char **argv) {
                (input(i, k + 1) - 2.0 * input(i, k) + input(i, k - 1)) * rhz2;
     };
 
-    auto initTestCurrent = [im, km, rhr2, rhz2, &getSolution](const DArray2 &input, DArray2 &output) {
-        for (int k = 1; k < km + 1; k++) {
+    auto initTestCurrent = [im, km, rhr2, rhz2, &getSolution, &syncShadows, &my_km_range, &comp_time](DArray2 &input, DArray2 &output) {
+        syncShadows(input);
+        Timer tm;
+        const auto k_start = my_km_range.localStart(1);
+        const auto k_end = my_km_range.localEnd(km + 1);
+        for (int k = k_start; k < k_end; k++) {
             double s = (1.5 * input(2, k) - 4.5 * input(1, k)) * rhr2 +
                        (input(1, k + 1) - 2.0 * input(1, k) + input(1, k - 1)) * rhz2;
             output(1, k) = -s;
@@ -285,24 +220,10 @@ int main(int argc, char **argv) {
                 output(i, k) = -getSolution(input, i, k);
             }
         }
+        comp_time += tm.time();
     };
 
-/*
-    вычисление разностей
-
-      do i=2,2*im+1
-         do k=2,km
-            gg(i,k)=jf(i,k+1)-jf(i,k)
-            phi1(i,k)=aa1(i,k+1)-aa1(i,k)
-         enddo
-         gg(i,1)=0.d0               !?
-         gg(i,km+1)=0.d0            !?
-         phi1(i,1)=0.d0               !?
-         phi1(i,km+1)=0.d0            !?
-      enddo
-*/
-
-    auto computeDifference = [&](DArray2 &input, DArray2 &output) {
+    /*auto computeDifference = [&](DArray2 &input, DArray2 &output) {
         for (int i = 1; i < 2 * im + 1; i++) {
             for (int k = 1; k < km; k++) {
                 output(i, k) = input(i, k + 1) - input(i, k);
@@ -310,25 +231,7 @@ int main(int argc, char **argv) {
             output(i, 0) = 0.0;
             output(i, km) = 0.0;
         }
-    };
-
-/*
-    преобразование Фурье для правых частей
-
-    do i=2,2*im+1
-        do k=1,km
-            dan(k)=dcmplx(jf(i,k+1),0.d0)
-            dan(k+km)=dcmplx(jf(i,km+2-k),0.d0)
-        enddo
-
-        call fftc(dan,2*n,1,2*km)
-
-        do k=1,2*km
-            bb(i,k)=dreal(dan(k))
-            bb(i,2*km+k)=dimag(dan(k))
-         enddo
-    enddo    ! i
-*/
+    };*/
 
     auto computeFFT = [im, km, n, &ft_time](const DArray2 &input, DArray2 &output) {
         Timer tm;
@@ -347,39 +250,14 @@ int main(int argc, char **argv) {
         ft_time += tm.time();
     };
 
-/*
-    прогонка по радиусу
-
-    do j=1,4*km
-        j1=j-1
-        if(j1.ge.2*km) j1=j1-2*km
-
-        s=9.d0/(2.d0*hr**2)+(4.d0/hz**2)*(dsin(c*j1))**2
-        al(2)=3.d0/(2.d0*hr**2*s)
-        be(2)=bb(2,j)/s
-
-        do i=3,2*im+1
-            s=(2.d0*((i-1.5d0)/hr)**2)/((i-1.d0)*(i-2.d0))+
-     =         (4.d0/hz**2)*(dsin(c*j1))**2-
-     =         al(i-1)*(i-2.5d0)/((i-2.d0)*hr**2)
-           al(i)=(i-0.5d0)/(s*(i-1.d0)*hr**2)
-           be(i)=(be(i-1)*(i-2.5d0)/((i-2.d0)*hr**2)+bb(i,j))/s
-        enddo
-
-        ff(2*im+2,j)=0.d0
-
-        do i=2*im+1,2,-1
-           ff(i,j)=al(i)*ff(i+1,j)+be(i)
-        enddo
-
-    enddo     !   j
-*/
-
-    auto computeProgonka = [im, km, imp2, hr, hr2, hz, hz2, c, &prog_time](const DArray2 &input, DArray2 &output) {
+    auto computeProgonka = [im, km, imp2, hr, hr2, hz, hz2, c, &my_km4_range, &prog_time, &comp_time](const DArray2 &input, DArray2 &output) {
         Timer tm;
         DArray1 al(imp2), be(imp2);
-        for (int k = 0; k < 4 * km; k++) {
-            const int k1 = (k >= 2 * km ? k - 2 * km : k);
+        const auto k_start = my_km4_range.localStart(0);
+        const auto k_end = my_km4_range.localEnd(4 * km);
+        for (int k = k_start; k < k_end; k++) {
+            const int kk = my_km4_range.toGlobal(k);
+            const int k1 = (kk >= 2 * km ? kk - 2 * km : kk);
             const double dsin = sin(c * k1);
             double s = 9.0 / (2.0 * hr2) + (4.0 / hz2) * dsin * dsin;
             al[1] = 3.0 / (2.0 * hr2 * s);
@@ -397,25 +275,8 @@ int main(int argc, char **argv) {
             }
         }
         prog_time += tm.time();
+        comp_time += tm.time();
     };
-
-/*
-    обратное преобразование Фурье
-
-    do i=2,2*im+1
-        do k=1,2*km
-            dan(k)=dcmplx(ff(i,k),ff(i,k+2*km))
-        enddo
-
-        call fftc(dan,2*n,-1,2*km)
-
-        do k=1,km
-            phi(i,k+1)=dreal(dan(k))
-        enddo
-        phi(i,1)=phi(i,2)
-        phi(i,km+2)=phi(i,km+1)
-      enddo    ! i
-*/
 
     auto computeFFTInverse = [&](const DArray2 &input, DArray2 &output) {
         Timer tm;
@@ -434,64 +295,62 @@ int main(int argc, char **argv) {
         ft_time += tm.time();
     };
 
-/*
-    proverka2 решения dd dd
-
-      do i=3,im+1
-         do k=2,km
-            dd(i,k)=phi(i,k)-aa1(i,k)
-         enddo
-      enddo
-*/
-
-    auto computeSolutionDifference = [&](DArray2 &first, const DArray2 &second) -> DArray2 {
-        DArray2 output(im + 2, km + 2);
+    auto computeSolutionDifference = [im, km, &my_km_range, &comp_time](DArray2 &first, const DArray2 &second) -> DArray2 {
+        DArray2 output(im + 2, my_km_range.size());
+        const auto k_start = my_km_range.localStart(1);
+        const auto k_end = my_km_range.localEnd(km);
+        Timer tm;
         for (int i = 2; i < im + 1; i++) {
-            for (int k = 1; k < km; k++) {
+            for (int k = k_start; k < k_end; k++) {
                 output(i, k) = first(i, k) - second(i, k);
             }
         }
+        comp_time += tm.time();
         return output;
     };
 
     // The main program's body
 
-    Timer full_time;
+    Timer work_timer;
 
     for (int m = 1; m <= 1000; m++) {
         initTestSolution(aa1, m);
         initTestCurrent(aa1, jf);
-        //doOutput("aa1 aa1", aa1);
-        //doOutput("jf jf", jf);
-
-        //computeDifference(jf, gg);
-        //computeDifference(aa1, phi1);
-        //doOutput("gg gg", gg);
 
         computeFFT(jf, bb);
-        //doOutput("bb bb", bb);
-
         computeProgonka(bb, ff);
-        //doOutput("ff ff", ff);
-        //doOutput("ff1 ff1", ff1);
-
         computeFFTInverse(ff, phi);
-        //doOutput("phi phi", phi);
-        //doOutput("phi1 phi1", phi1);
     }
 
-    doOutputRange("phi phi", phi, {0, 7, 0, km + 2});
-    doOutput("proverka 2 dd dd", computeSolutionDifference(phi, aa1));
+    gatherAndOutput("phi phi", phi, km_decomp, {0, 7, 0, km + 2});
+    gatherAndOutput("proverka 2 dd dd", computeSolutionDifference(phi, aa1), km_decomp, {0, 7, 0, 6});
 
-    if (file_output) {
+    auto work_time = work_timer.time();
+
+    double time = 0;
+    MPI_Reduce(&work_time, &time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+
+    if (file_output && rank == 0) {
         out_lst.close();
     }
 
-    auto time = full_time.time();
-    cout << "Im: " << im << ", Km: " << km << endl;
-    cout << "TIME: " << time << endl;
-    cout << "FT: " << ft_time <<
+    std::ostringstream out;
+
+    if (rank == 0) {
+        out << "Im: " << im << ", Km: " << km << ", Nodes: " << size << endl;
+        out << "TIME: " << time << endl;
+    }
+
+    out << rank << ": Work time: " << work_time <<
+        ", Comp time: " << comp_time <<
+        ", Shadow time: " << shadow_time <<
+        //", Reduce time: " << reduce_time <<
+        ", FT: " << ft_time <<
         ", Prog: " << prog_time << endl;
+
+    std::cout << out.str();
+
+    MPI_Finalize();
 
     return 0;
 }
