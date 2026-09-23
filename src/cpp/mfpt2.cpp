@@ -69,15 +69,14 @@ void fftc(CArray1 &a, int n, int isi, int np) {
         }
     }
     const double pi2 = 8.0 * std::atan(1.0);
-    int nn = np;
-    int j = 1;
-    for (int i = 1; i <= nn; i++) {
+    int j = 0;
+    for (int i = 0; i < np; i++) {
         if (i < j) {
-            std::swap(a[i - 1], a[j - 1]);
+            std::swap(a[i], a[j]);
         }
-        int m = nn / 2;
+        int m = np / 2;
         do {
-            if (j <= m) {
+            if (j < m) {
                 break;
             }
             j -= m;
@@ -86,18 +85,18 @@ void fftc(CArray1 &a, int n, int isi, int np) {
         j += m;
     }
     int mm = 1;
-    while (mm < nn) {
+    while (mm < np) {
         const int ii = 2 * mm;
         const double th = pi2 / (n * isi >= 0 ? std::abs(ii) : -std::abs(ii));
         const auto sin_th = std::sin(th);
         const auto sin_th_d2 = std::sin(th * 0.5);
         Complex w1 {-2.0 * sin_th_d2 * sin_th_d2, sin_th};
         Complex w = 1.0;
-        for (int m = 1; m <= mm; m++) {
-            for (int i = m; i <= nn; i += ii) {
-                const Complex t = w * a[i + mm - 1];
-                a[i + mm - 1] = a[i - 1] - t;
-                a[i - 1] += t;
+        for (int m = 0; m < mm; m++) {
+            for (int i = m; i < np; i += ii) {
+                const Complex t = w * a[i + mm];
+                a[i + mm] = a[i] - t;
+                a[i] += t;
             }
             w += w1 * w;
         }
