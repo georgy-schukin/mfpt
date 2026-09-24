@@ -25,18 +25,11 @@ public:
         _data((sz[0] + 2 * shadow_sz[0]) * (sz[1] + 2 * shadow_sz[1]), T {}) {
     }
 
-    ShadowedArray2D& operator==(const ShadowedArray2D &arr) {
-        _size = arr._size;
-        _shadow_size = arr._shadow_size;
-        _data = arr._data;
-        return *this;
-    }
-    ShadowedArray2D& operator==(ShadowedArray2D &&arr) {
-        _size = std::move(arr._size);
-        _shadow_size = std::move(arr._shadow_size);
-        _data = std::move(arr._data);
-        return *this;
-    }
+    ShadowedArray2D(const ShadowedArray2D&) = default;
+    ShadowedArray2D(ShadowedArray2D&&) = default;
+
+    ShadowedArray2D& operator=(const ShadowedArray2D&) = default;
+    ShadowedArray2D& operator=(ShadowedArray2D&&) = default;
 
     void populate(const T* raw_data, size_t data_sz) {
         for (size_t i = 0; i < data_sz; i++) {
@@ -126,7 +119,7 @@ private:
 
 /*template <typename T>
 void copy(const ShadowedArray2D<T> &src, ShadowedArray2D<T> &dst,
-            size_t src_start_x = 0, size_t src_start_y = 0,            
+            size_t src_start_x = 0, size_t src_start_y = 0,
             size_t dst_start_x = 0, size_t dst_start_y = 0) {
     const auto start_x = std::min(src_start_x, src.size(0));
     const auto start_y = std::min(src_start_y, src.size(1));

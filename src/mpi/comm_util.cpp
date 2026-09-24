@@ -135,7 +135,7 @@ DArray2 gatherArrayK(const DArray2 &local_data, const BlockDecomposition &k_deco
 
     DArray2 data;
     if (rank == root) {
-        data == DArray2(local_data.size(0), k_decomp.fullSize());
+        data = DArray2(local_data.size(0), k_decomp.fullSize());
         for (int r = 0; r < size; r++) {
             auto recv_type = makeDataVectorType(data.size(0), k_decomp.getBlockSize(r), data.size(1) + 2 * data.shadowSize(1));
             MPI_Irecv(&data(0, k_decomp.getBlockShift(r)), 1, recv_type, r, TAG_GATHER, MPI_COMM_WORLD, &reqs[r + 1]);
