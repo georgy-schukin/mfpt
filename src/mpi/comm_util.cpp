@@ -171,6 +171,16 @@ DArray2 scatterArrayK(const DArray2 &data, int size_x, const BlockDecomposition 
     return local_data;
 }
 
+void combineIFromK(const DArray2 &src, DArray2 &dst, const BlockDecomposition &i_decomp, const BlockDecomposition &k_decomp, int rank, int size) {
+    auto row_type = makeRowType(src);
+    std::vector<int> send_dispsl, recv_displs;
+    //MPI_Alltoallw(src.data(), )
+}
+
+void combineKFromI(const DArray2 &src, DArray2 &dst, const BlockDecomposition &k_decomp, const BlockDecomposition &i_decomp, int rank, int size) {
+
+}
+
 void reduceSumOpVector(void *in, void *inout, int *len, MPI_Datatype *dtype) {
     if (*len != 1) {
         throw std::runtime_error("Not implemented for len != 1");

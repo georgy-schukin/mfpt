@@ -20,4 +20,7 @@ void syncShadowsI(DArray2 &arr, MPI_Datatype row_type, int rank, int size);
 DArray2 gatherArrayK(const DArray2 &local_data, const BlockDecomposition &k_decomp, int rank, int size, int root = 0);
 DArray2 scatterArrayK(const DArray2 &data, int size_x, const BlockDecomposition &k_decomp, int shadow_x, int shadow_y, int rank, int size, int root = 0);
 
+void combineIFromK(const DArray2 &src, DArray2 &dst, const BlockDecomposition &i_decomp, const BlockDecomposition &k_decomp, int rank, int size);
+void combineKFromI(const DArray2 &src, DArray2 &dst, const BlockDecomposition &k_decomp, const BlockDecomposition &i_decomp, int rank, int size);
+
 MPI_Op makeVectorSumOp();

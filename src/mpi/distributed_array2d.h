@@ -98,11 +98,16 @@ public:
         return _data;
     }
 
+    ShadowedArray2D<double>& local_data() {
+        return _data;
+    }
+
     void syncShadows();
-    void combineFrom(DistributedArray2D &src);
+    void combineFrom(const DistributedArray2D &src);
 
 private:
     DistributedArray2D(size_t sx, size_t sy, int shadow_x, int shadow_y, const DistributionType &dtype, const BlockDecomposition &decomp, int rank);
+    DistributedArray2D(ShadowedArray2D<double> &&data, const DistributionType &dtype, const BlockDecomposition &decomp, int rank);
 
 private:
     ShadowedArray2D<double> _data;

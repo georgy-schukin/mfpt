@@ -102,8 +102,8 @@ int main(int argc, char **argv) {
     const bool file_output = (argc > 3) ? stoi(argv[3]) : FOUT_DEF;
     const bool full_output = (argc > 4) ? stoi(argv[4]) : FULL_OUTPUT_DEF;
 
-    const size_t imp = im + 2;
-    const size_t imp2 = 2 * imp;
+    //const size_t imp = im + 2;
+    const size_t imp2 = 2 * im + 2;
     const size_t kmp = km + 2;
 
     BlockDecomposition km_decomp(kmp, size);
@@ -154,11 +154,18 @@ int main(int argc, char **argv) {
     double prog_time = 0;
     double comp_time = 0;
     double shadow_time = 0;
+    double redistr_time = 0;
 
     auto syncShadows = [rank, size, &shadow_time](DDArray2 &array) {
         Timer tm;
         array.syncShadows();
         shadow_time += tm.time();
+    };
+
+    auto redistrArray = [&redistr_time](const DDArray2 &src, DDArray2 &dst) {
+        Timer tm;
+        dst.combineFrom(src);
+        redistr_time += tm.time();
     };
 
     // Init functions
@@ -207,10 +214,10 @@ int main(int argc, char **argv) {
 
     auto initTestCurrent = [im, km, rhr2, rhz2, &getSolution, &syncShadows, &comp_time](DDArray2 &input, DDArray2 &output) {
         syncShadows(input);
-        Timer tm;
         const auto my_km_range = output.range();
         const auto k_start = my_km_range.localStart(1);
         const auto k_end = my_km_range.localEnd(km + 1);
+        Timer tm;
         for (int k = k_start; k < k_end; k++) {
             double s = (1.5 * input(2, k) - 4.5 * input(1, k)) * rhr2 +
                        (input(1, k + 1) - 2.0 * input(1, k) + input(1, k - 1)) * rhz2;
@@ -232,20 +239,30 @@ int main(int argc, char **argv) {
         }
     };*/
 
-    auto computeFFT = [im, km, n, &ft_time](const DDArray2 &input, DDArray2 &output) {
+    auto computeFFT = [im, km, n, &redistrArray, &ft_time, &comp_time](const DDArray2 &input, DDArray2 &output) {
         Timer tm;
+        BlockDecomposition im_decomp(input.size(0), input.numOfNodes());
+        DDArray2 input_i(im_decomp, input.size(1), input.rank());
+        DDArray2 output_i(im_decomp, output.size(1), output.rank());
+        redistrArray(input, input_i);
         CArray1 dan(2 * km);
-        for (int i = 1; i < 2 * im + 1; i++) {
+        Timer ctm;
+        const auto my_im_range = input_i.range();
+        const auto i_start = my_im_range.localStart(1);
+        const auto i_end = my_im_range.localEnd(2 * im + 1);
+        for (int i = i_start; i < i_end; i++) {
             for (int k = 0; k < km; k++) {
-                dan[k] = Complex {input(i, k + 1), 0.0};
-                dan[k + km] = Complex {input(i, km - k), 0.0};
+                dan[k] = Complex {input_i(i, k + 1), 0.0};
+                dan[k + km] = Complex {input_i(i, km - k), 0.0};
             }
             fftc(dan, 2 * n, 1, 2 * km);
             for (int k = 0; k < 2 * km; k++) {
-                output(i, k) = dan[k].real();
-                output(i, 2 * km + k) = dan[k].imag();
+                output_i(i, k) = dan[k].real();
+                output_i(i, 2 * km + k) = dan[k].imag();
             }
         }
+        comp_time += ctm.time();
+        redistrArray(output_i, output);
         ft_time += tm.time();
     };
 
@@ -255,6 +272,7 @@ int main(int argc, char **argv) {
         const auto my_km4_range = input.range();
         const auto k_start = my_km4_range.localStart(0);
         const auto k_end = my_km4_range.localEnd(4 * km);
+        Timer ctm;
         for (int k = k_start; k < k_end; k++) {
             const int kk = my_km4_range.toGlobal(k);
             const int k1 = (kk >= 2 * km ? kk - 2 * km : kk);
@@ -274,24 +292,34 @@ int main(int argc, char **argv) {
                 output(i, k) = al[i] * output(i + 1, k) + be[i];
             }
         }
+        comp_time += ctm.time();
         prog_time += tm.time();
-        comp_time += tm.time();
     };
 
-    auto computeFFTInverse = [im, km, n, &ft_time](const DDArray2 &input, DDArray2 &output) {
+    auto computeFFTInverse = [im, km, n, &redistrArray, &ft_time, &comp_time](const DDArray2 &input, DDArray2 &output) {
         Timer tm;
+        BlockDecomposition im_decomp(input.size(0), input.numOfNodes());
+        DDArray2 input_i(im_decomp, input.size(1), input.rank());
+        DDArray2 output_i(im_decomp, output.size(1), output.rank());
+        redistrArray(input, input_i);
         CArray1 dan(2 * km);
-        for (int i = 1; i < 2 * im + 1; i++) {
+        const auto my_im_range = input_i.range();
+        const auto i_start = my_im_range.localStart(1);
+        const auto i_end = my_im_range.localEnd(2 * im + 1);
+        Timer ctm;
+        for (int i = i_start; i < i_end; i++) {
             for (int k = 0; k < 2 * km; k++) {
-                dan[k] = Complex {input(i, k), input(i, k + 2 * km)};
+                dan[k] = Complex {input_i(i, k), input_i(i, k + 2 * km)};
             }
             fftc(dan, 2 * n, -1, 2 * km);
             for (int k = 0; k < km; k++) {
-                output(i, k + 1) = dan[k].real();
+                output_i(i, k + 1) = dan[k].real();
             }
-            output(i, 0) = output(i, 1);
-            output(i, km + 1) = output(i, km);
+            output_i(i, 0) = output(i, 1);
+            output_i(i, km + 1) = output(i, km);
         }
+        comp_time += ctm.time();
+        redistrArray(output_i, output);
         ft_time += tm.time();
     };
 
@@ -345,7 +373,7 @@ int main(int argc, char **argv) {
     out << rank << ": Work time: " << work_time <<
         ", Comp time: " << comp_time <<
         ", Shadow time: " << shadow_time <<
-        //", Reduce time: " << reduce_time <<
+        ", Redistr time: " << redistr_time <<
         ", FT: " << ft_time <<
         ", Prog: " << prog_time << endl;
 

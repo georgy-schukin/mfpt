@@ -148,13 +148,12 @@ int main(int argc, char **argv) {
     real*8 bb(2*imp,4*km),ff(2*imp,4*km),ff1(2*imp,4*km)
 */
 
-    const size_t imp = im + 2;
-    const size_t imp2 = 2 * imp;
+    const size_t imp2 = 2 * im + 2;
     const size_t kmp = km + 2;
 
     //DArray2 br(ims, kms), bf(ims, kms), bz(ims, kms);
-    DArray2 aa(imp2, kmp), jf(imp2, kmp), aa1(imp2, kmp);
-    DArray2 gg(imp2, kmp), bb(imp2, 4 * km), ff(imp2, 4 * km), phi(imp2, kmp);
+    DArray2 jf(imp2, kmp), aa1(imp2, kmp);
+    DArray2 bb(imp2, 4 * km), ff(imp2, 4 * km), phi(imp2, kmp);
     //DArray2 dd(ims, kms), phi1(ims2, kms), ff1(ims2, kms);
 
 /*
