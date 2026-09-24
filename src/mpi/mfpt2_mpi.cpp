@@ -1,6 +1,7 @@
 #include "defs.h"
 #include "block_decomp.h"
 #include "comm_util.h"
+#include "distributed_array2d.h"
 #include "../common/output.h"
 #include "../common/timer.h"
 
@@ -18,6 +19,7 @@
 
 using namespace std;
 
+using DDArray2 = DistributedArray2D;
 using Complex = std::complex<double>;
 using CArray1 = std::vector<Complex>;
 using namespace std::complex_literals;
@@ -105,15 +107,13 @@ int main(int argc, char **argv) {
     const size_t kmp = km + 2;
 
     BlockDecomposition km_decomp(kmp, size);
-    const size_t km_bsize = km_decomp.getBlockSize(rank);
-    const auto my_km_range = km_decomp.getRange(rank);
-
     BlockDecomposition km4_decomp(4 * km, size);
-    const size_t km4_bsize = km4_decomp.getBlockSize(rank);
-    const auto my_km4_range = km4_decomp.getRange(rank);
 
-    DArray2 jf(imp2, km_bsize), aa1(imp2, km_bsize);
-    DArray2 bb(imp2, km4_bsize), ff(imp2, km4_bsize), phi(imp2, km_bsize);
+    DDArray2 jf(imp2, km_decomp, rank);
+    DDArray2 aa1(imp2, km_decomp, rank, 1);
+    DDArray2 bb(imp2, km4_decomp, rank);
+    DDArray2 ff(imp2, km4_decomp, rank);
+    DDArray2 phi(imp2, km_decomp, rank);
 
     const double pi = 3.14159265358979;
     const double c = 0.5 * pi / km;
@@ -143,9 +143,9 @@ int main(int argc, char **argv) {
         }
     };
 
-    auto gatherAndOutput = [rank, size, file_output, &outputArray](const std::string &header, const DArray2 &local_data, const BlockDecomposition &decomp, const std::array<int, 4> &range) {
+    auto gatherAndOutput = [rank, size, file_output, &outputArray](const std::string &header, const DDArray2 &array, const std::array<int, 4> &range) {
         if (file_output) {
-            const auto arr = gatherArrayK(local_data, decomp, rank, size);
+            const auto arr = gatherArrayK(array.local_data(), array.decomp(), rank, size);
             outputArray(header, arr, range);
         }
     };
@@ -155,21 +155,20 @@ int main(int argc, char **argv) {
     double comp_time = 0;
     double shadow_time = 0;
 
-    auto syncShadows = [rank, size, &shadow_time](DArray2 &array) {
+    auto syncShadows = [rank, size, &shadow_time](DDArray2 &array) {
         Timer tm;
-        auto col_type = makeColType(array);
-        syncShadowsK(array, col_type, rank, size);
-        MPI_Type_free(&col_type);
+        array.syncShadows();
         shadow_time += tm.time();
     };
 
     // Init functions
 
-    auto initTestSolution = [im, km, zm, hz, hr2, &my_km_range, &comp_time](DArray2 &output, int m) {
+    auto initTestSolution = [im, km, zm, hz, hr2, &comp_time](DDArray2 &output, int m) {
         Timer tm;
         const double a0 = -0.1;
         const double a = 1e-3;
         const double d = 1.0 + 1e-5 * m;
+        const auto my_km_range = output.range();
         const auto k_start = my_km_range.localStart(0);
         const auto k_end = my_km_range.localEnd(km + 2);
         for (int k = k_start; k < k_end; k++) {
@@ -200,15 +199,16 @@ int main(int argc, char **argv) {
         comp_time += tm.time();
     };
 
-    auto getSolution = [rhr2, rhz2](const DArray2 &input, int i, int k) {
+    auto getSolution = [rhr2, rhz2](const DDArray2 &input, int i, int k) {
         return (((i + 0.5) * input(i + 1, k) - (i - 0.5) * input(i, k)) / (i) -
                 ((i - 0.5) * input(i, k) - (i - 1.5) * input(i - 1, k)) / (i - 1.0)) * rhr2 +
                (input(i, k + 1) - 2.0 * input(i, k) + input(i, k - 1)) * rhz2;
     };
 
-    auto initTestCurrent = [im, km, rhr2, rhz2, &getSolution, &syncShadows, &my_km_range, &comp_time](DArray2 &input, DArray2 &output) {
+    auto initTestCurrent = [im, km, rhr2, rhz2, &getSolution, &syncShadows, &comp_time](DDArray2 &input, DDArray2 &output) {
         syncShadows(input);
         Timer tm;
+        const auto my_km_range = output.range();
         const auto k_start = my_km_range.localStart(1);
         const auto k_end = my_km_range.localEnd(km + 1);
         for (int k = k_start; k < k_end; k++) {
@@ -232,7 +232,7 @@ int main(int argc, char **argv) {
         }
     };*/
 
-    auto computeFFT = [im, km, n, &ft_time](const DArray2 &input, DArray2 &output) {
+    auto computeFFT = [im, km, n, &ft_time](const DDArray2 &input, DDArray2 &output) {
         Timer tm;
         CArray1 dan(2 * km);
         for (int i = 1; i < 2 * im + 1; i++) {
@@ -249,9 +249,10 @@ int main(int argc, char **argv) {
         ft_time += tm.time();
     };
 
-    auto computeProgonka = [im, km, imp2, hr, hr2, hz, hz2, c, &my_km4_range, &prog_time, &comp_time](const DArray2 &input, DArray2 &output) {
+    auto computeProgonka = [im, km, imp2, hr, hr2, hz, hz2, c, &prog_time, &comp_time](const DDArray2 &input, DDArray2 &output) {
         Timer tm;
         DArray1 al(imp2), be(imp2);
+        const auto my_km4_range = input.range();
         const auto k_start = my_km4_range.localStart(0);
         const auto k_end = my_km4_range.localEnd(4 * km);
         for (int k = k_start; k < k_end; k++) {
@@ -277,7 +278,7 @@ int main(int argc, char **argv) {
         comp_time += tm.time();
     };
 
-    auto computeFFTInverse = [&](const DArray2 &input, DArray2 &output) {
+    auto computeFFTInverse = [im, km, n, &ft_time](const DDArray2 &input, DDArray2 &output) {
         Timer tm;
         CArray1 dan(2 * km);
         for (int i = 1; i < 2 * im + 1; i++) {
@@ -294,8 +295,9 @@ int main(int argc, char **argv) {
         ft_time += tm.time();
     };
 
-    auto computeSolutionDifference = [im, km, &my_km_range, &comp_time](DArray2 &first, const DArray2 &second) -> DArray2 {
-        DArray2 output(im + 2, my_km_range.size());
+    auto computeSolutionDifference = [im, km, &comp_time](const DDArray2 &first, const DDArray2 &second) -> DDArray2 {
+        DDArray2 output(im + 2, first.decomp(), first.rank());
+        const auto my_km_range = output.range();
         const auto k_start = my_km_range.localStart(1);
         const auto k_end = my_km_range.localEnd(km);
         Timer tm;
@@ -321,8 +323,8 @@ int main(int argc, char **argv) {
         computeFFTInverse(ff, phi);
     }
 
-    gatherAndOutput("phi phi", phi, km_decomp, {0, 7, 0, km + 2});
-    gatherAndOutput("proverka 2 dd dd", computeSolutionDifference(phi, aa1), km_decomp, {0, 7, 0, 6});
+    gatherAndOutput("phi phi", phi, {0, 7, 0, km + 2});
+    gatherAndOutput("proverka 2 dd dd", computeSolutionDifference(phi, aa1), {0, 7, 0, 6});
 
     auto work_time = work_timer.time();
 

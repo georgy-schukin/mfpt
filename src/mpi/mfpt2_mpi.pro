@@ -16,6 +16,7 @@ exists(local.pri) {
 SOURCES +=   \
     block_decomp.cpp \
     comm_util.cpp \
+    distributed_array2d.cpp \
     mfpt2_mpi.cpp
 
 HEADERS +=   \
@@ -24,4 +25,5 @@ HEADERS +=   \
     block_decomp.h \
     comm_util.h \
     defs.h \
+    distributed_array2d.h \
     shadowed_array2d.h
