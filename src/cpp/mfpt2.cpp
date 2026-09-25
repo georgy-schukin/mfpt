@@ -477,7 +477,7 @@ int main(int argc, char **argv) {
     }
 
     auto time = full_time.time();
-    cout << "Im: " << im << ", Km: " << km << endl;
+    cout << "Im: " << im << ", Km: " << km << ", Repeats: " << repeats << endl;
     cout << "TIME: " << time << endl;
     cout << "FT: " << ft_time <<
         ", Prog: " << prog_time << endl;

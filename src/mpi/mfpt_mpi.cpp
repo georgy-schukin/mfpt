@@ -49,6 +49,7 @@ int main(int argc, char **argv) {
                 " [file_output=" << FOUT_DEF << "]" <<
                 " [full_output=" << FULL_OUTPUT_DEF << "]" <<
                 endl;
+            MPI_Finalize();
             return 0;
         }
     }

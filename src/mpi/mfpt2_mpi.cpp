@@ -369,7 +369,7 @@ int main(int argc, char **argv) {
     std::ostringstream out;
 
     if (rank == 0) {
-        out << "Im: " << im << ", Km: " << km << ", Nodes: " << size << endl;
+        out << "Im: " << im << ", Km: " << km << ", Repeats: " << repeats << ", Nodes: " << size << endl;
         out << "TIME: " << time << endl;
     }
 
