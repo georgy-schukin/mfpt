@@ -94,11 +94,11 @@ public:
         return _num_of_nodes;
     }
 
-    const ShadowedArray2D<double>& local_data() const {
+    const ShadowedArray2D<double>& localArray() const {
         return _data;
     }
 
-    ShadowedArray2D<double>& local_data() {
+    ShadowedArray2D<double>& localArray() {
         return _data;
     }
 

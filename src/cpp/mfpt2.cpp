@@ -112,6 +112,7 @@ int main(int argc, char **argv) {
 
     const int IM_DEF = 80;
     const int N_DEF = 7;
+    const int REPEATS_DEF = 1000;
     const int FOUT_DEF = 1;
     const int FULL_OUTPUT_DEF = 0;
 
@@ -121,6 +122,7 @@ int main(int argc, char **argv) {
             cout << argv[0] <<
                 " [im=" << IM_DEF << "]" <<
                 " [n=" << N_DEF << "]" <<
+                " [repeats=" << REPEATS_DEF << "]" <<
                 " [file_output=" << FOUT_DEF << "]" <<
                 " [full_output=" << FULL_OUTPUT_DEF << "]" <<
                 endl;
@@ -131,8 +133,10 @@ int main(int argc, char **argv) {
     const int im = (argc > 1) ? stoi(argv[1]) : IM_DEF;
     const int n = (argc > 2) ? stoi(argv[2]) : N_DEF;
     const int km = std::pow(2, n);
-    const bool file_output = (argc > 3) ? stoi(argv[3]) : FOUT_DEF;
-    const bool full_output = (argc > 4) ? stoi(argv[4]) : FULL_OUTPUT_DEF;
+    const int repeats = (argc > 3) ? stoi(argv[3]) : REPEATS_DEF;
+    const bool file_output = (argc > 4) ? stoi(argv[4]) : FOUT_DEF;
+    const bool full_output = (argc > 5) ? stoi(argv[5]) : FULL_OUTPUT_DEF;
+
 
 /*
     integer imp,kmp,im,km,i,k,n,k1,km2,j,k2,i1,m,nj,j1
@@ -456,26 +460,13 @@ int main(int argc, char **argv) {
 
     Timer full_time;
 
-    for (int m = 1; m <= 1000; m++) {
-        initTestSolution(aa1, m);
+    for (int m = 0; m < repeats; m++) {
+        initTestSolution(aa1, m + 1);
         initTestCurrent(aa1, jf);
-        //doOutput("aa1 aa1", aa1);
-        //doOutput("jf jf", jf);
-
-        //computeDifference(jf, gg);
-        //computeDifference(aa1, phi1);
-        //doOutput("gg gg", gg);
 
         computeFFT(jf, bb);
-        //doOutput("bb bb", bb);
-
         computeProgonka(bb, ff);
-        //doOutput("ff ff", ff);
-        //doOutput("ff1 ff1", ff1);
-
-        computeFFTInverse(ff, phi);
-        //doOutput("phi phi", phi);
-        //doOutput("phi1 phi1", phi1);
+        computeFFTInverse(ff, phi);        
     }
 
     doOutputRange("phi phi", phi, {0, 7, 0, km + 2});

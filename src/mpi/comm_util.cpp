@@ -15,31 +15,38 @@ enum Tags: int {
 }
 
 MPI_Datatype makeColType(const DArray2 &array) {
-    MPI_Datatype col_type;
-    MPI_Type_vector(array.size(0), 1, array.fullSize(1), MPI_DOUBLE, &col_type);
-    MPI_Type_commit(&col_type);
-    return col_type;
+    return makeDataVectorType(array.size(0), 1, array.fullSize(1), 1);
 }
 
 MPI_Datatype makeRowType(const DArray2 &array) {
-    MPI_Datatype row_type;
-    MPI_Type_contiguous(array.size(1), MPI_DOUBLE, &row_type);
+    return makeRowType(array.size(1), array.fullSize(1));
+}
+
+MPI_Datatype makeRowType(int block_size, int extent) {
+    MPI_Datatype tmp_type, row_type;
+    MPI_Type_contiguous(block_size, MPI_DOUBLE, &tmp_type);
+    MPI_Type_create_resized(tmp_type, 0, extent * sizeof(double), &row_type);
     MPI_Type_commit(&row_type);
     return row_type;
 }
 
-MPI_Datatype makeDataVectorType(int num_of_blocks, int block_size, int stride) {
-    MPI_Datatype send_type;
-    MPI_Type_vector(num_of_blocks, block_size, stride, MPI_DOUBLE, &send_type);
-    MPI_Type_commit(&send_type);
-    return send_type;
+MPI_Datatype makeDataVectorType(int num_of_blocks, int block_size, int stride, int extent) {
+    MPI_Datatype type, vtype;
+    MPI_Type_vector(num_of_blocks, block_size, stride, MPI_DOUBLE, &type);
+    if (extent > 0) {
+        MPI_Type_create_resized(type, 0, extent * sizeof(double), &vtype);
+    } else {
+        MPI_Type_dup(type, &vtype);
+    }
+    MPI_Type_commit(&vtype);
+    return vtype;
 }
 
 MPI_Datatype makeDataVectorType(const DArray2 &array) {
-    return makeDataVectorType(array.size(0), array.size(1), array.size(1) + 2 * array.shadowSize(1));
+    return makeDataVectorType(array.size(0), array.size(1), array.fullSize(1));
 }
 
-void syncShadowsKPrev(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
+void syncShadowsColsPrev(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
     MPI_Request r1, r2;
     if (rank > 0) {
         // Recv in shadow from prev.
@@ -57,7 +64,7 @@ void syncShadowsKPrev(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
     }
 }
 
-void syncShadowsKNext(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
+void syncShadowsColsNext(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
     MPI_Request r1, r2;
     if (rank < size - 1) {
         // Recv in shadow from next.
@@ -75,7 +82,7 @@ void syncShadowsKNext(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
     }
 }
 
-void syncShadowsIPrev(DArray2 &arr, MPI_Datatype row_type, int rank, int size) {
+void syncShadowsRowsPrev(DArray2 &arr, MPI_Datatype row_type, int rank, int size) {
     MPI_Request r1, r2;
     if (rank > 0) {
         // Recv in shadow from prev.
@@ -93,7 +100,7 @@ void syncShadowsIPrev(DArray2 &arr, MPI_Datatype row_type, int rank, int size) {
     }
 }
 
-void syncShadowsINext(DArray2 &arr, MPI_Datatype row_type, int rank, int size) {
+void syncShadowsRowsNext(DArray2 &arr, MPI_Datatype row_type, int rank, int size) {
     MPI_Request r1, r2;
     if (rank < size - 1) {
         // Recv in shadow from next.
@@ -111,17 +118,17 @@ void syncShadowsINext(DArray2 &arr, MPI_Datatype row_type, int rank, int size) {
     }
 }
 
-void syncShadowsK(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
-    syncShadowsKPrev(arr, col_type, rank, size);
-    syncShadowsKNext(arr, col_type, rank, size);
+void syncShadowsCols(DArray2 &arr, MPI_Datatype col_type, int rank, int size) {
+    syncShadowsColsPrev(arr, col_type, rank, size);
+    syncShadowsColsNext(arr, col_type, rank, size);
 }
 
-void syncShadowsI(DArray2 &arr, MPI_Datatype row_type, int rank, int size) {
-    syncShadowsIPrev(arr, row_type, rank, size);
-    syncShadowsINext(arr, row_type, rank, size);
+void syncShadowsRows(DArray2 &arr, MPI_Datatype row_type, int rank, int size) {
+    syncShadowsRowsPrev(arr, row_type, rank, size);
+    syncShadowsRowsNext(arr, row_type, rank, size);
 }
 
-DArray2 gatherArrayK(const DArray2 &local_data, const BlockDecomposition &k_decomp, int rank, int size, int root) {
+DArray2 gatherArrayCols(const DArray2 &local_data, const BlockDecomposition &cols_decomp, int rank, int size, int root) {
     std::vector<MPI_Request> reqs;
     if (rank == root) {
         reqs.resize(size + 1);
@@ -135,10 +142,10 @@ DArray2 gatherArrayK(const DArray2 &local_data, const BlockDecomposition &k_deco
 
     DArray2 data;
     if (rank == root) {
-        data = DArray2(local_data.size(0), k_decomp.fullSize());
+        data = DArray2(local_data.size(0), cols_decomp.fullSize());
         for (int r = 0; r < size; r++) {
-            auto recv_type = makeDataVectorType(data.size(0), k_decomp.getBlockSize(r), data.size(1) + 2 * data.shadowSize(1));
-            MPI_Irecv(&data(0, k_decomp.getBlockShift(r)), 1, recv_type, r, TAG_GATHER, MPI_COMM_WORLD, &reqs[r + 1]);
+            auto recv_type = makeDataVectorType(data.size(0), cols_decomp.getBlockSize(r), data.fullSize(1));
+            MPI_Irecv(&data(0, cols_decomp.getBlockShift(r)), 1, recv_type, r, TAG_GATHER, MPI_COMM_WORLD, &reqs[r + 1]);
             MPI_Type_free(&recv_type);
         }
     }
@@ -146,7 +153,7 @@ DArray2 gatherArrayK(const DArray2 &local_data, const BlockDecomposition &k_deco
     return data;
 }
 
-DArray2 scatterArrayK(const DArray2 &data, int size_x, const BlockDecomposition &k_decomp, int shadow_x, int shadow_y, int rank, int size, int root) {
+DArray2 scatterArrayCols(const DArray2 &data, int size_x, const BlockDecomposition &cols_decomp, int shadow_x, int shadow_y, int rank, int size, int root) {
     std::vector<MPI_Request> reqs;
     if (rank == root) {
         reqs.resize(size + 1);
@@ -154,7 +161,7 @@ DArray2 scatterArrayK(const DArray2 &data, int size_x, const BlockDecomposition 
         reqs.resize(1);
     }
 
-    DArray2 local_data(size_x, k_decomp.getBlockSize(rank), shadow_x, shadow_y);
+    DArray2 local_data(size_x, cols_decomp.getBlockSize(rank), shadow_x, shadow_y);
 
     auto recv_type = makeDataVectorType(local_data);
     MPI_Irecv(&local_data(0, 0), 1, recv_type, 0, TAG_SCATTER, MPI_COMM_WORLD, &reqs[0]);
@@ -162,8 +169,8 @@ DArray2 scatterArrayK(const DArray2 &data, int size_x, const BlockDecomposition 
 
     if (rank == root) {
         for (int r = 0; r < size; r++) {
-            auto send_type = makeDataVectorType(data.size(0), k_decomp.getBlockSize(r), data.size(1) + 2 * data.shadowSize(1));
-            MPI_Isend(&data(0, k_decomp.getBlockShift(r)), 1, send_type, r, TAG_SCATTER, MPI_COMM_WORLD, &reqs[r + 1]);
+            auto send_type = makeDataVectorType(data.size(0), cols_decomp.getBlockSize(r), data.size(1) + 2 * data.shadowSize(1));
+            MPI_Isend(&data(0, cols_decomp.getBlockShift(r)), 1, send_type, r, TAG_SCATTER, MPI_COMM_WORLD, &reqs[r + 1]);
             MPI_Type_free(&send_type);
         }
     }
@@ -171,14 +178,52 @@ DArray2 scatterArrayK(const DArray2 &data, int size_x, const BlockDecomposition 
     return local_data;
 }
 
-void combineIFromK(const DArray2 &src, DArray2 &dst, const BlockDecomposition &i_decomp, const BlockDecomposition &k_decomp, int rank, int size) {
-    auto row_type = makeRowType(src);
-    std::vector<int> send_dispsl, recv_displs;
-    //MPI_Alltoallw(src.data(), )
+void combineRowsFromCols(const DArray2 &src, DArray2 &dst, const BlockDecomposition &rows_decomp, const BlockDecomposition &cols_decomp, int rank, int size) {
+    auto send_row_type = makeRowType(src);
+    std::vector<int> send_displs(size), recv_displs(size);
+    std::vector<int> send_counts(size), recv_counts(size);
+    std::vector<MPI_Datatype> send_types(size, send_row_type);
+    std::vector<MPI_Datatype> recv_types(size);
+
+    for (int i = 0; i < size; i++) {
+        send_counts[i] = rows_decomp.getBlockSize(i);
+        send_displs[i] = (src.at(rows_decomp.getBlockShift(i), 0) - src.at(0, 0)) * sizeof(double);
+        recv_counts[i] = rows_decomp.getBlockSize(rank);
+        recv_displs[i] = (dst.at(0, cols_decomp.getBlockShift(i)) - dst.at(0, 0)) * sizeof(double);
+        recv_types[i] = makeRowType(cols_decomp.getBlockSize(i), dst.fullSize(1));
+        //std::cout << rank << " RC: send " << i << ": " << send_counts[i] << " " << send_displs[i] << ", recv " << recv_counts[i] << " " << recv_displs[i] << std::endl;
+    }
+
+    MPI_Alltoallw(&src(0, 0), send_counts.data(), send_displs.data(), send_types.data(),
+                  &dst(0, 0), recv_counts.data(), recv_displs.data(), recv_types.data(), MPI_COMM_WORLD);
+    MPI_Type_free(&send_row_type);
+    for (auto &tp: recv_types) {
+        MPI_Type_free(&tp);
+    }
 }
 
-void combineKFromI(const DArray2 &src, DArray2 &dst, const BlockDecomposition &k_decomp, const BlockDecomposition &i_decomp, int rank, int size) {
+void combineColsFromRows(const DArray2 &src, DArray2 &dst, const BlockDecomposition &cols_decomp, const BlockDecomposition &rows_decomp, int rank, int size) {
+    auto recv_row_type = makeRowType(dst);
+    std::vector<int> send_displs(size), recv_displs(size);
+    std::vector<int> send_counts(size), recv_counts(size);
+    std::vector<MPI_Datatype> send_types(size);
+    std::vector<MPI_Datatype> recv_types(size, recv_row_type);
 
+    for (int i = 0; i < size; i++) {
+        send_counts[i] = rows_decomp.getBlockSize(rank);
+        send_displs[i] = (src.at(0, cols_decomp.getBlockShift(i)) - src.at(0, 0)) * sizeof(double);
+        send_types[i] = makeRowType(cols_decomp.getBlockSize(i), src.fullSize(1));
+        recv_counts[i] = rows_decomp.getBlockSize(i);
+        recv_displs[i] = (dst.at(rows_decomp.getBlockShift(i), 0) - dst.at(0, 0)) * sizeof(double);
+        //std::cout << rank << " CR: send " << i << ": " << send_counts[i] << " " << send_displs[i] << ", recv " << recv_counts[i] << " " << recv_displs[i] << std::endl;
+    }
+
+    MPI_Alltoallw(&src(0, 0), send_counts.data(), send_displs.data(), send_types.data(),
+                  &dst(0, 0), recv_counts.data(), recv_displs.data(), recv_types.data(), MPI_COMM_WORLD);
+    MPI_Type_free(&recv_row_type);
+    for (auto &tp: send_types) {
+        MPI_Type_free(&tp);
+    }
 }
 
 void reduceSumOpVector(void *in, void *inout, int *len, MPI_Datatype *dtype) {

@@ -24,19 +24,19 @@ DistributedArray2D::DistributedArray2D(size_t sx, size_t sy, int shadow_x, int s
 void DistributedArray2D::syncShadows() {
     if (distributionType() == BY_ROWS) {
         auto row_type = makeRowType(_data);
-        syncShadowsI(_data, row_type, _rank, _num_of_nodes);
+        syncShadowsRows(_data, row_type, _rank, _num_of_nodes);
         MPI_Type_free(&row_type);
     } else if (distributionType() == BY_COLS) {
         auto col_type = makeColType(_data);
-        syncShadowsK(_data, col_type, _rank, _num_of_nodes);
+        syncShadowsCols(_data, col_type, _rank, _num_of_nodes);
         MPI_Type_free(&col_type);
     }
 }
 
 void DistributedArray2D::combineFrom(const DistributedArray2D &src) {
     if (distributionType() == BY_COLS && src.distributionType() == BY_ROWS) {
-        combineKFromI(src.local_data(), local_data(), decomp(), src.decomp(), rank(), numOfNodes());
+        combineColsFromRows(src.localArray(), localArray(), decomp(), src.decomp(), rank(), numOfNodes());
     } else if (distributionType() == BY_ROWS && src.distributionType() == BY_COLS) {
-        combineIFromK(src.local_data(), local_data(), decomp(), src.decomp(), rank(), numOfNodes());
+        combineRowsFromCols(src.localArray(), localArray(), decomp(), src.decomp(), rank(), numOfNodes());
     }
 }

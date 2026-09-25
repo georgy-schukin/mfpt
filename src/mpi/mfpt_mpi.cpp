@@ -95,7 +95,7 @@ int main(int argc, char **argv) {
 
     auto gatherAndOutput = [&](const std::string &header, const DArray2 &local_data) {
         if (file_output) {
-            const auto arr = gatherArrayK(local_data, kms_decomp, rank, size);
+            const auto arr = gatherArrayCols(local_data, kms_decomp, rank, size);
             outputArray(header, arr);
         }
     };
@@ -123,13 +123,13 @@ int main(int argc, char **argv) {
 
     auto syncShadows = [col_type, rank, size, &shadow_time](DArray2 &array) {
         Timer tm;
-        syncShadowsK(array, col_type, rank, size);
+        syncShadowsCols(array, col_type, rank, size);
         shadow_time += tm.time();
     };
 
     auto syncShadowsNext = [col_type, rank, size, &shadow_time](DArray2 &array) {
         Timer tm;
-        syncShadowsKNext(array, col_type, rank, size);
+        syncShadowsColsNext(array, col_type, rank, size);
         shadow_time += tm.time();
     };
 
@@ -390,14 +390,14 @@ int main(int argc, char **argv) {
     gatherAndOutput("proverka2 dd dd", computeSolutionDifference(phi, gg));
 
     // Temporary fix: compute solution on a root(0) node
-    auto phi_global = gatherArrayK(phi, kms_decomp, rank, size);
-    auto jf_global = gatherArrayK(jf, kms_decomp, rank, size);
+    auto phi_global = gatherArrayCols(phi, kms_decomp, rank, size);
+    auto jf_global = gatherArrayCols(jf, kms_decomp, rank, size);
     DArray2 aa_global;
     if (rank == 0) {
         aa_global = DArray2(ims2, kms);
         compSolution(phi_global, jf_global, aa_global);
     }
-    aa = scatterArrayK(aa_global, ims2, kms_decomp, 0, 1, rank, size);
+    aa = scatterArrayCols(aa_global, ims2, kms_decomp, 0, 1, rank, size);
 
     outputArray("aa aa", aa_global);
 
