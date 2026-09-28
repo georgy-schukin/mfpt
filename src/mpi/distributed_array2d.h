@@ -1,6 +1,6 @@
 #pragma once
 
-#include "shadowed_array2d.h"
+#include "defs.h"
 #include "block_decomp.h"
 
 class DistributedArray2D {
@@ -94,11 +94,11 @@ public:
         return _num_of_nodes;
     }
 
-    const ShadowedArray2D<double>& localArray() const {
+    const DArray2& localArray() const {
         return _data;
     }
 
-    ShadowedArray2D<double>& localArray() {
+    DArray2& localArray() {
         return _data;
     }
 
@@ -107,12 +107,12 @@ public:
 
 private:
     DistributedArray2D(size_t sx, size_t sy, int shadow_x, int shadow_y, const DistributionType &dtype, const BlockDecomposition &decomp, int rank);
-    DistributedArray2D(ShadowedArray2D<double> &&data, const DistributionType &dtype, const BlockDecomposition &decomp, int rank);
+    DistributedArray2D(DArray2 &&data, const DistributionType &dtype, const BlockDecomposition &decomp, int rank);
 
 private:
-    ShadowedArray2D<double> _data;
+    DArray2 _data;
     const DistributionType _distr_type;
-    const BlockDecomposition &_decomp;
+    BlockDecomposition _decomp;
     BlockDecomposition::Range _range;
     int _rank;
     int _num_of_nodes;

@@ -3,7 +3,7 @@
 
 #include <mpi.h>
 
-DistributedArray2D::DistributedArray2D(ShadowedArray2D<double> &&data, const DistributionType &dtype, const BlockDecomposition &decomp, int rank) :
+DistributedArray2D::DistributedArray2D(DArray2 &&data, const DistributionType &dtype, const BlockDecomposition &decomp, int rank) :
     _data(std::move(data)),
     _distr_type(dtype),
     _decomp(decomp),
