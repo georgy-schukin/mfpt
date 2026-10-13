@@ -116,7 +116,7 @@ int main(int argc, char **argv) {
     double shadow_time = 0;
     double reduce_time = 0;
     double ft_time = 0;
-    double prog_time = 0;
+    double sweep_time = 0;
     double sol_time = 0;
     double mag_time = 0;
 
@@ -242,7 +242,7 @@ int main(int argc, char **argv) {
         computeFFTAux(input, output, dsins, 1.0);
     };
 
-    auto computeProgonka = [im, km, ims2, hr, hz, hr2, hz2, c, &my_km_range, &comp_time, &prog_time](const DArray2 &input, DArray2 &output) {
+    auto computeSweep = [im, km, ims2, hr, hz, hr2, hz2, c, &my_km_range, &comp_time, &sweep_time](const DArray2 &input, DArray2 &output) {
         Timer tm;
         DArray1 al(ims2), be(ims2);
         const auto k_start = my_km_range.localStart(1);
@@ -266,7 +266,7 @@ int main(int argc, char **argv) {
             }
         }
         comp_time += tm.time();
-        prog_time += tm.time();
+        sweep_time += tm.time();
     };
 
     auto computeSolutionDifference = [im, km, &my_km_range, &syncShadows, &getSolution, &comp_time](DArray2 &first, const DArray2 &second) -> DArray2 {
@@ -376,7 +376,7 @@ int main(int argc, char **argv) {
     // k: 1..km, i: 2..2*im+1: be(i) <- be(i - 1), bb(i, k)
     // k: 1..km, i: 2*im..1: ff(i, k) <- al(i), be(i), ff(i + 1, k)
     // i: seq, k: par
-    computeProgonka(bb, ff);
+    computeSweep(bb, ff);
 
     gatherAndOutput("ff ff", ff);
     gatherAndOutput("ff1 ff1", ff1);
@@ -431,7 +431,7 @@ int main(int argc, char **argv) {
         ", Shadow time: " << shadow_time <<
         ", Reduce time: " << reduce_time <<
         ", FT: " << ft_time <<
-        ", Prog: " << prog_time <<
+        ", Sweep: " << sweep_time <<
         ", Sol: " << sol_time <<
         ", Mag: " << mag_time << endl;
 

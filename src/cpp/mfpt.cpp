@@ -111,7 +111,7 @@ int main(int argc, char **argv) {
     };
 
     double ft_time = 0;
-    double prog_time = 0;
+    double sweep_time = 0;
     double sol_time = 0;
     double mag_time = 0;
 
@@ -286,7 +286,7 @@ c         s=dcos(pi*z/zm)
       enddo     !   j
 */
 
-    auto computeProgonka = [im, km, ims2, hr, hz, hr2, hz2, c, &prog_time](const DArray2 &input, DArray2 &output) {
+    auto computeSweep = [im, km, ims2, hr, hz, hr2, hz2, c, &sweep_time](const DArray2 &input, DArray2 &output) {
         Timer tm;
         DArray1 al(ims2), be(ims2);
         for (int k = 1; k < km; k++) {
@@ -306,7 +306,7 @@ c         s=dcos(pi*z/zm)
                 output(i, k) = al[i] * output(i + 1, k) + be[i];
             }
         }
-        prog_time += tm.time();
+        sweep_time += tm.time();
     };
 
     /*
@@ -445,7 +445,7 @@ c         s=dcos(pi*z/zm)
     computeFFT(phi1, ff1, dsins);
     doOutput("bb bb", bb);
 
-    computeProgonka(bb, ff);
+    computeSweep(bb, ff);
 
     doOutput("ff ff", ff);
     doOutput("ff1 ff1", ff1);
@@ -471,7 +471,7 @@ c         s=dcos(pi*z/zm)
     cout << "Im: " << im << ", Km: " << km << endl;
     cout << "TIME: " << time << endl;
     cout << "FT: " << ft_time <<
-        ", Prog: " << prog_time <<
+        ", Sweep: " << sweep_time <<
         ", Sol: " << sol_time <<
         ", Mag: " << mag_time << endl;
 

@@ -110,9 +110,9 @@ int main(int argc, char **argv) {
     const size_t imp2 = 2 * im + 2;
     const size_t kmp = km + 2;
 
-    BlockDecomposition km_decomp(kmp, size);
-    BlockDecomposition km4_decomp(4 * km, size);
-    BlockDecomposition im2_decomp(imp2, size);
+    BlockDecomposition km_decomp = BlockDecomposition(km, size).grown(1); // km + 2
+    BlockDecomposition km4_decomp(4 * km, size); // 4 * km
+    BlockDecomposition im2_decomp = BlockDecomposition(2 * im, size).grown(1); // 2 * im + 2
 
     DDArray2 jf(imp2, km_decomp, rank);
     DDArray2 aa1(imp2, km_decomp, rank, 1);
@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
     };
 
     double ft_time = 0;
-    double prog_time = 0;
+    double sweep_time = 0;
     double comp_time = 0;
     double shadow_time = 0;
     double redistr_time = 0;
@@ -244,33 +244,45 @@ int main(int argc, char **argv) {
         }
     };*/
 
-    auto computeFFT = [im, km, n, &redistrArray, &im2_decomp, &ft_time, &comp_time](const DDArray2 &input, DDArray2 &output) {
-        Timer tm;        
-        DDArray2 input_i(im2_decomp, input.decomp().fullSize(), input.rank());
-        DDArray2 output_i(im2_decomp, output.decomp().fullSize(), output.rank());
-        redistrArray(input, input_i);
+    auto computeFFTByRows = [im, km, n, &redistrArray, &comp_time](const DDArray2 &input, DDArray2 &output) {
         CArray1 dan(2 * km);
         Timer ctm;
-        const auto my_im_range = input_i.range();
+        const auto my_im_range = input.range();
         const auto i_start = my_im_range.localStart(1);
-        const auto i_end = my_im_range.localEnd(2 * im + 1);        
+        const auto i_end = my_im_range.localEnd(2 * im + 1);
         for (int i = i_start; i < i_end; i++) {
             for (int k = 0; k < km; k++) {
-                dan[k] = Complex {input_i(i, k + 1), 0.0};
-                dan[k + km] = Complex {input_i(i, km - k), 0.0};
+                dan[k] = Complex {input(i, k + 1), 0.0};
+                dan[k + km] = Complex {input(i, km - k), 0.0};
             }
             fftc(dan, 2 * n, 1, 2 * km);
             for (int k = 0; k < 2 * km; k++) {
-                output_i(i, k) = dan[k].real();
-                output_i(i, 2 * km + k) = dan[k].imag();
+                output(i, k) = dan[k].real();
+                output(i, 2 * km + k) = dan[k].imag();
             }
         }
         comp_time += ctm.time();
+    };
+
+    auto computeFFTByCols = [&im2_decomp, &redistrArray, &computeFFTByRows](const DDArray2 &input, DDArray2 &output) {
+        DDArray2 input_i(im2_decomp, input.decomp().fullSize(), input.rank());
+        DDArray2 output_i(im2_decomp, output.decomp().fullSize(), output.rank());
+        redistrArray(input, input_i);
+        computeFFTByRows(input_i, output_i);
         redistrArray(output_i, output);
+    };
+
+    auto computeFFT = [&ft_time, &computeFFTByRows, &computeFFTByCols](const DDArray2 &input, DDArray2 &output) {
+        Timer tm;
+        if (input.isDistributedByRows()) {
+            computeFFTByRows(input, output);
+        } else {
+            computeFFTByCols(input, output);
+        }
         ft_time += tm.time();
     };
 
-    auto computeProgonka = [im, km, imp2, hr, hr2, hz, hz2, c, &prog_time, &comp_time](const DDArray2 &input, DDArray2 &output) {
+    auto computeSweep = [im, km, imp2, hr, hr2, hz, hz2, c, &sweep_time, &comp_time](const DDArray2 &input, DDArray2 &output) {
         Timer tm;
         DArray1 al(imp2), be(imp2);
         const auto my_km4_range = input.range();
@@ -297,32 +309,44 @@ int main(int argc, char **argv) {
             }
         }
         comp_time += ctm.time();
-        prog_time += tm.time();
+        sweep_time += tm.time();
     };
 
-    auto computeFFTInverse = [im, km, n, &redistrArray, &im2_decomp, &ft_time, &comp_time](const DDArray2 &input, DDArray2 &output) {
-        Timer tm;        
-        DDArray2 input_i(im2_decomp, input.decomp().fullSize(), input.rank());
-        DDArray2 output_i(im2_decomp, output.decomp().fullSize(), output.rank());
-        redistrArray(input, input_i);
+    auto computeFFTInverseByRows = [im, km, n, &comp_time](const DDArray2 &input, DDArray2 &output) {
         CArray1 dan(2 * km);
-        const auto my_im_range = input_i.range();
+        const auto my_im_range = input.range();
         const auto i_start = my_im_range.localStart(1);
         const auto i_end = my_im_range.localEnd(2 * im + 1);
         Timer ctm;
         for (int i = i_start; i < i_end; i++) {
             for (int k = 0; k < 2 * km; k++) {
-                dan[k] = Complex {input_i(i, k), input_i(i, k + 2 * km)};
+                dan[k] = Complex {input(i, k), input(i, k + 2 * km)};
             }
             fftc(dan, 2 * n, -1, 2 * km);
             for (int k = 0; k < km; k++) {
-                output_i(i, k + 1) = dan[k].real();
+                output(i, k + 1) = dan[k].real();
             }
-            output_i(i, 0) = output_i(i, 1);
-            output_i(i, km + 1) = output_i(i, km);
+            output(i, 0) = output(i, 1);
+            output(i, km + 1) = output(i, km);
         }
         comp_time += ctm.time();
+    };
+
+    auto computeFFTInverseByCols = [&redistrArray, &im2_decomp, &computeFFTInverseByRows](const DDArray2 &input, DDArray2 &output) {
+        DDArray2 input_i(im2_decomp, input.decomp().fullSize(), input.rank());
+        DDArray2 output_i(im2_decomp, output.decomp().fullSize(), output.rank());
+        redistrArray(input, input_i);
+        computeFFTInverseByRows(input_i, output_i);
         redistrArray(output_i, output);
+    };
+
+    auto computeFFTInverse = [&ft_time, &computeFFTInverseByRows, &computeFFTInverseByCols](const DDArray2 &input, DDArray2 &output) {
+        Timer tm;
+        if (input.isDistributedByRows()) {
+            computeFFTInverseByRows(input, output);
+        } else {
+            computeFFTInverseByCols(input, output);
+        }
         ft_time += tm.time();
     };
 
@@ -350,7 +374,7 @@ int main(int argc, char **argv) {
         initTestCurrent(aa1, jf);
 
         computeFFT(jf, bb);
-        computeProgonka(bb, ff);
+        computeSweep(bb, ff);
         computeFFTInverse(ff, phi);
     }
 
@@ -378,7 +402,7 @@ int main(int argc, char **argv) {
         ", Shadow time: " << shadow_time <<
         ", Redistr time: " << redistr_time <<
         ", FT: " << ft_time <<
-        ", Prog: " << prog_time << endl;
+        ", Sweep: " << sweep_time << endl;
 
     std::cout << out.str();
 

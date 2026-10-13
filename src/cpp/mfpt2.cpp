@@ -208,7 +208,7 @@ int main(int argc, char **argv) {
     };
 
     double ft_time = 0;
-    double prog_time = 0;
+    double sweep_time = 0;
     //double sol_time = 0;
     //double mag_time = 0;
 
@@ -377,7 +377,7 @@ int main(int argc, char **argv) {
     enddo     !   j
 */
 
-    auto computeProgonka = [im, km, imp2, hr, hr2, hz, hz2, c, &prog_time](const DArray2 &input, DArray2 &output) {
+    auto computeSweep = [im, km, imp2, hr, hr2, hz, hz2, c, &sweep_time](const DArray2 &input, DArray2 &output) {
         Timer tm;
         DArray1 al(imp2), be(imp2);
         for (int k = 0; k < 4 * km; k++) {
@@ -398,7 +398,7 @@ int main(int argc, char **argv) {
                 output(i, k) = al[i] * output(i + 1, k) + be[i];
             }
         }
-        prog_time += tm.time();
+        sweep_time += tm.time();
     };
 
 /*
@@ -465,7 +465,7 @@ int main(int argc, char **argv) {
         initTestCurrent(aa1, jf);
 
         computeFFT(jf, bb);
-        computeProgonka(bb, ff);
+        computeSweep(bb, ff);
         computeFFTInverse(ff, phi);        
     }
 
@@ -480,7 +480,7 @@ int main(int argc, char **argv) {
     cout << "Im: " << im << ", Km: " << km << ", Repeats: " << repeats << endl;
     cout << "TIME: " << time << endl;
     cout << "FT: " << ft_time <<
-        ", Prog: " << prog_time << endl;
+        ", Sweep: " << sweep_time << endl;
 
     return 0;
 }

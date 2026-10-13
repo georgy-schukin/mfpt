@@ -102,6 +102,10 @@ public:
         return _data;
     }
 
+    bool isDistributedByRows() const {
+        return distributionType() == BY_ROWS;
+    }
+
     void syncShadows();
     void combineFrom(const DistributedArray2D &src);
 
