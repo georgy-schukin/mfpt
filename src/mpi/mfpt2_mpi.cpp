@@ -370,6 +370,10 @@ int main(int argc, char **argv) {
         const int my_rank = input.rank();
         const int num_of_nodes = input.numOfNodes();
         AsyncOps send_ops;
+        DArray1 sins(4 * km);
+        for (int k = 0; k < sins.size(); k++) {
+            sins[k] = sin(c * (k >= 2 * km ? k - 2 * km : k));
+        }
         for (int task = 0; task < task_decomp.numOfBlocks(); task++) {
             const auto k_start = task_decomp.blockShift(task);
             const auto k_size = task_decomp.blockSize(task);
@@ -380,17 +384,19 @@ int main(int argc, char **argv) {
                 recvShadowPiece(be, -1, k_start, k_size, my_rank - 1);
             }
             Timer ctm;
-            for (int k = k_start; k < k_end; k++) {
-                const int k1 = (k >= 2 * km ? k - 2 * km : k);
-                const double dsin = sin(c * k1);
-                double s = 9.0 / (2.0 * hr2) + (4.0 / hz2) * dsin * dsin;
-                if (has_one) {
+            if (has_one) {
+                for (int k = k_start; k < k_end; k++) {
+                    const auto dsin = sins[k];
+                    const double s = 9.0 / (2.0 * hr2) + (4.0 / hz2) * dsin * dsin;
                     al(1, k) = 3.0 / (2.0 * hr2 * s);
                     be(1, k) = input(1, k) / s;
                 }
-                for (int i = i_start1; i < i_end1; i++) {
-                    const auto ii = my_im_range.toGlobal(i);
-                    s = (2.0 * ((ii - 0.5) / hr) * ((ii - 0.5) / hr)) / ((ii) * (ii - 1.0)) +
+            }
+            for (int i = i_start1; i < i_end1; i++) {
+                const auto ii = my_im_range.toGlobal(i);
+                for (int k = k_start; k < k_end; k++) {
+                    const auto dsin = sins[k];
+                    const double s = (2.0 * ((ii - 0.5) / hr) * ((ii - 0.5) / hr)) / ((ii) * (ii - 1.0)) +
                         (4.0 / hz2) * dsin * dsin -
                         al(i - 1, k) * (ii - 1.5) / ((ii - 1.0) * hr2);
                     al(i, k) = (ii + 0.5) / (s * (ii) * hr2);
@@ -424,8 +430,8 @@ int main(int argc, char **argv) {
                     output(last_ind, k) = 0.0;
                 }
             }
-            for (int k = k_start; k < k_end; k++) {
-                for (int i = i_end2 - 1; i >= i_start2; i--) {
+            for (int i = i_end2 - 1; i >= i_start2; i--) {
+                for (int k = k_start; k < k_end; k++) {
                     output(i, k) = al(i, k) * output(i + 1, k) + be(i, k);
                 }
             }
