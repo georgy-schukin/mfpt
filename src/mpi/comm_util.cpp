@@ -153,6 +153,31 @@ DArray2 gatherArrayCols(const DArray2 &local_data, const BlockDecomposition &col
     return data;
 }
 
+DArray2 gatherArrayRows(const DArray2 &local_data, const BlockDecomposition &rows_decomp, int rank, int size, int root) {
+    std::vector<MPI_Request> reqs;
+    if (rank == root) {
+        reqs.resize(size + 1);
+    } else {
+        reqs.resize(1);
+    }
+
+    auto send_type = makeDataVectorType(local_data);
+    MPI_Isend(&local_data(0, 0), 1, send_type, 0, TAG_GATHER, MPI_COMM_WORLD, &reqs[0]);
+    MPI_Type_free(&send_type);
+
+    DArray2 data;
+    if (rank == root) {
+        data = DArray2(rows_decomp.fullSize(), local_data.size(1));
+        for (int r = 0; r < size; r++) {
+            auto recv_type = makeDataVectorType(rows_decomp.blockSize(r), data.size(1), data.fullSize(1));
+            MPI_Irecv(&data(rows_decomp.blockShift(r), 0), 1, recv_type, r, TAG_GATHER, MPI_COMM_WORLD, &reqs[r + 1]);
+            MPI_Type_free(&recv_type);
+        }
+    }
+    MPI_Waitall(reqs.size(), reqs.data(), MPI_STATUSES_IGNORE);
+    return data;
+}
+
 DArray2 scatterArrayCols(const DArray2 &data, int size_x, const BlockDecomposition &cols_decomp, int shadow_x, int shadow_y, int rank, int size, int root) {
     std::vector<MPI_Request> reqs;
     if (rank == root) {

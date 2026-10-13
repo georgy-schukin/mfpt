@@ -79,6 +79,7 @@ int main(int argc, char **argv) {
     const int FOUT_DEF = 1;
     const int FULL_OUTPUT_DEF = 0;
     const int DECOMP_BY_ROWS_DEF = 0;
+    const int TASK_SIZE_DEF = 16;
 
     int rank, size;
 
@@ -96,6 +97,7 @@ int main(int argc, char **argv) {
                 " [file_output=" << FOUT_DEF << "]" <<
                 " [full_output=" << FULL_OUTPUT_DEF << "]" <<
                 " [decomp_by_rows=" << DECOMP_BY_ROWS_DEF << "]" <<
+                " [tas_size=" << TASK_SIZE_DEF << "]" <<
                 endl;
             MPI_Finalize();
             return 0;
@@ -109,6 +111,7 @@ int main(int argc, char **argv) {
     const bool file_output = (argc > 4) ? stoi(argv[4]) : FOUT_DEF;
     const bool full_output = (argc > 5) ? stoi(argv[5]) : FULL_OUTPUT_DEF;
     const bool decomp_by_rows = (argc > 6) ? stoi(argv[6]) : DECOMP_BY_ROWS_DEF;
+    const int task_size = (argc > 7) ? stoi(argv[7]) : TASK_SIZE_DEF;
 
     //const size_t imp = im + 2;
     const size_t imp2 = 2 * im + 2;    
@@ -122,8 +125,8 @@ int main(int argc, char **argv) {
 
     DDArray2 jf(decomp_im2_km, rank);
     DDArray2 aa1(decomp_im2_km, rank, 1);
-    DDArray2 bb(decomp_im2_km4, rank);
-    DDArray2 ff(decomp_im2_km4, rank);
+    DDArray2 bb(decomp_im2_km4, rank), al(decomp_im2_km4, rank, 1), be(decomp_im2_km4, rank, 1);
+    DDArray2 ff(decomp_im2_km4, rank, 1);
     DDArray2 phi(decomp_im2_km, rank);
 
     const double pi = 3.14159265358979;
@@ -156,7 +159,7 @@ int main(int argc, char **argv) {
 
     auto gatherAndOutput = [rank, size, file_output, &outputArray](const std::string &header, const DDArray2 &array, const std::array<int, 4> &range) {
         if (file_output) {
-            const auto arr = gatherArrayCols(array.localArray(), array.decomp(), rank, size);
+            const auto arr = array.gather(0);
             outputArray(header, arr, range);
         }
     };
@@ -173,6 +176,22 @@ int main(int argc, char **argv) {
         shadow_time += tm.time();
     };
 
+    const int TAG_SHADOW_PIECE = 1000;
+
+    auto sendShadowPieceAsync = [TAG_SHADOW_PIECE, &shadow_time](DDArray2 &src, int i, int k, int num, int dest_rank) -> AsyncOp {
+        Timer tm;
+        MPI_Request req;
+        MPI_Isend(&src(i, k), num, MPI_DOUBLE, dest_rank, TAG_SHADOW_PIECE, MPI_COMM_WORLD, &req);
+        shadow_time += tm.time();
+        return AsyncOp(req);
+    };
+
+    auto recvShadowPiece = [TAG_SHADOW_PIECE, &shadow_time](DDArray2 &dest, int i, int k, int num, int src_rank) {
+        Timer tm;
+        MPI_Recv(&dest(i, k), num, MPI_DOUBLE, src_rank, TAG_SHADOW_PIECE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        shadow_time += tm.time();
+    };
+
     auto redistrArray = [&redistr_time](const DDArray2 &src, DDArray2 &dst) {
         Timer tm;
         dst.combineFrom(src);
@@ -186,7 +205,10 @@ int main(int argc, char **argv) {
         const double a0 = -0.1;
         const double a = 1e-3;
         const double d = 1.0 + 1e-5 * m;
-        const auto my_km_range = output.range();
+        const auto my_im_range = output.range(0);
+        const auto i_start = my_im_range.localStart(1);
+        const auto i_end = my_im_range.localEnd(2 * im + 2);
+        const auto my_km_range = output.range(1);
         const auto k_start = my_km_range.localStart(0);
         const auto k_end = my_km_range.localEnd(km + 2);
         for (int k = k_start; k < k_end; k++) {
@@ -194,23 +216,35 @@ int main(int argc, char **argv) {
             const double z = hz * (kk + 1 - 1.5);
             const double z2 = z * z;
             const double s = a * z2 * (z - 1.5 - zm) + d;
-            for (int i = 1; i < 2 * im + 2; i++) {
-                output(i, k) = s * (i + 1 - 2 * im - 2.0) * (i + 1 - 1.5) * hr2;
+            for (int i = i_start; i < i_end; i++) {
+                const auto ii = my_im_range.toGlobal(i);
+                output(i, k) = s * (ii - 2 * im - 1.0) * (ii - 0.5) * hr2;
             }
-            output(0, k) = -output(1, k);
-            output(2 * im + 1, k) = 0.0;
+            //output(0, k) = -output(1, k);
+            //output(2 * im + 1, k) = 0.0;
+        }
+        if (my_im_range.hasIndex(0)) {
+            for (int k = k_start; k < k_end; k++) {
+                output(0, k) = -output(1, k);
+            }
+        }
+        if (my_im_range.hasIndex(2 * im + 1)) {
+            const auto dst_loc = my_im_range.toLocal(2 * im + 1);
+            for (int k = k_start; k < k_end; k++) {
+                output(dst_loc, k) = 0.0;
+            }
         }
         if (my_km_range.hasIndex(0)) {
             const auto dst_loc = my_km_range.toLocal(0);
             const auto src_loc = my_km_range.toLocal(1);
-            for (int i = 0; i < 2 * im + 2; i++) {
+            for (int i = 0; i < i_end; i++) {
                 output(i, dst_loc) = output(i, src_loc);
             }
         }
         if (my_km_range.hasIndex(km + 1)) {
             const auto dst_loc = my_km_range.toLocal(km + 1);
             const auto src_loc = my_km_range.toLocal(km);
-            for (int i = 0; i < 2 * im + 2; i++) {
+            for (int i = 0; i < i_end; i++) {
                 output(i, dst_loc) = output(i, src_loc);
             }
         }
@@ -218,22 +252,29 @@ int main(int argc, char **argv) {
     };
 
     auto getSolution = [rhr2, rhz2](const DDArray2 &input, int i, int k) {
-        return (((i + 0.5) * input(i + 1, k) - (i - 0.5) * input(i, k)) / (i) -
-                ((i - 0.5) * input(i, k) - (i - 1.5) * input(i - 1, k)) / (i - 1.0)) * rhr2 +
+        const auto ii = input.range(0).toGlobal(i);
+        return (((ii + 0.5) * input(i + 1, k) - (ii - 0.5) * input(i, k)) / (ii) -
+                ((ii - 0.5) * input(i, k) - (ii - 1.5) * input(i - 1, k)) / (ii - 1.0)) * rhr2 +
                (input(i, k + 1) - 2.0 * input(i, k) + input(i, k - 1)) * rhz2;
     };
 
     auto initTestCurrent = [im, km, rhr2, rhz2, &getSolution, &syncShadows, &comp_time](DDArray2 &input, DDArray2 &output) {
         syncShadows(input);
-        const auto my_km_range = output.range();
+        const auto my_im_range = output.range(0);
+        const auto i_start = my_im_range.localStart(2);
+        const auto i_end = my_im_range.localEnd(2 * im + 1);
+        const auto my_km_range = output.range(1);
         const auto k_start = my_km_range.localStart(1);
         const auto k_end = my_km_range.localEnd(km + 1);
+        const auto has_one = my_im_range.hasIndex(1);
         Timer tm;
         for (int k = k_start; k < k_end; k++) {
-            double s = (1.5 * input(2, k) - 4.5 * input(1, k)) * rhr2 +
-                       (input(1, k + 1) - 2.0 * input(1, k) + input(1, k - 1)) * rhz2;
-            output(1, k) = -s;
-            for (int i = 2; i < 2 * im + 1; i++) {
+            if (has_one) {
+                double s = (1.5 * input(2, k) - 4.5 * input(1, k)) * rhr2 +
+                        (input(1, k + 1) - 2.0 * input(1, k) + input(1, k - 1)) * rhz2;
+                output(1, k) = -s;
+            }
+            for (int i = i_start; i < i_end; i++) {
                 output(i, k) = -getSolution(input, i, k);
             }
         }
@@ -316,42 +357,67 @@ int main(int argc, char **argv) {
         comp_time += ctm.time();
     };
 
-    auto computeSweepByRows = [im, km, imp2, hr, hr2, hz, hz2, c, &comp_time](const DDArray2 &input, DDArray2 &output) {
-        const int task_size = 4;
-        BlockDecomposition task_decomp(input.size(1), input.size(1) / task_size);
-        DArray2 al(input.size(0), input.size(1), 1), be(input.size(0), input.size(1), 1);
+    auto computeSweepByRows = [im, km, imp2, hr, hr2, hz, hz2, c, task_size, &al, &be, &comp_time,
+                                &sendShadowPieceAsync, &recvShadowPiece](const DDArray2 &input, DDArray2 &output) {
+        const auto num_of_tasks = input.size(1) / task_size;
+        BlockDecomposition task_decomp(input.size(1), num_of_tasks);
+        //DArray2 al(input.size(0), input.size(1), 1), be(input.size(0), input.size(1), 1);
         // Front sweep
         const auto my_im_range = input.range();
         const auto i_start1 = my_im_range.localStart(2);
         const auto i_end1 = my_im_range.localEnd(2 * im + 1);
+        const auto has_one = my_im_range.hasIndex(1);
+        const int my_rank = input.rank();
+        const int num_of_nodes = input.numOfNodes();
+        AsyncOps send_ops;
         for (int task = 0; task < task_decomp.numOfBlocks(); task++) {
             const auto k_start = task_decomp.blockShift(task);
-            const auto k_end = task_decomp.blockShift(task + 1);
+            const auto k_size = task_decomp.blockSize(task);
+            const auto k_end = k_start + k_size;
+            // Recv al, be from prev rank
+            if (my_rank > 0) {
+                recvShadowPiece(al, -1, k_start, k_size, my_rank - 1);
+                recvShadowPiece(be, -1, k_start, k_size, my_rank - 1);
+            }
             Timer ctm;
             for (int k = k_start; k < k_end; k++) {
                 const int k1 = (k >= 2 * km ? k - 2 * km : k);
                 const double dsin = sin(c * k1);
                 double s = 9.0 / (2.0 * hr2) + (4.0 / hz2) * dsin * dsin;
-                al(1, k) = 3.0 / (2.0 * hr2 * s);
-                be(1, k) = input(1, k) / s;
+                if (has_one) {
+                    al(1, k) = 3.0 / (2.0 * hr2 * s);
+                    be(1, k) = input(1, k) / s;
+                }
                 for (int i = i_start1; i < i_end1; i++) {
-                    s = (2.0 * ((i - 0.5) / hr) * ((i - 0.5) / hr)) / ((i) * (i - 1.0)) +
+                    const auto ii = my_im_range.toGlobal(i);
+                    s = (2.0 * ((ii - 0.5) / hr) * ((ii - 0.5) / hr)) / ((ii) * (ii - 1.0)) +
                         (4.0 / hz2) * dsin * dsin -
-                        al[i - 1] * (i - 1.5) / ((i - 1.0) * hr2);
-                    al(i, k) = (i + 0.5) / (s * (i) * hr2);
-                    be(i, k) = (be(i - 1, k) * (i - 1.5) / ((i - 1.0) * hr2) + input(i, k)) / s;
+                        al(i - 1, k) * (ii - 1.5) / ((ii - 1.0) * hr2);
+                    al(i, k) = (ii + 0.5) / (s * (ii) * hr2);
+                    be(i, k) = (be(i - 1, k) * (ii - 1.5) / ((ii - 1.0) * hr2) + input(i, k)) / s;
                 }
             }
             comp_time += ctm.time();
+            // Send al, be to next rank
+            if (my_rank < num_of_nodes - 1) {
+                send_ops.add(sendShadowPieceAsync(al, al.size(0) - 1, k_start, k_size, my_rank + 1));
+                send_ops.add(sendShadowPieceAsync(be, be.size(0) - 1, k_start, k_size, my_rank + 1));
+            }
         }
+        send_ops.wait();
         // Back sweep
         const auto i_start2 = my_im_range.localStart(1);
-        const auto i_end2 = my_im_range.localEnd(2 * im);
-        const auto has_last = input.range().hasIndex(2 * im + 1);
-        const auto last_ind = input.range().toLocal(2 * im + 1);
+        const auto i_end2 = my_im_range.localEnd(2 * im + 1);
+        const auto has_last = my_im_range.hasIndex(2 * im + 1);
+        const auto last_ind = my_im_range.toLocal(2 * im + 1);
         for (int task = 0; task < task_decomp.numOfBlocks(); task++) {
             const auto k_start = task_decomp.blockShift(task);
-            const auto k_end = task_decomp.blockShift(task + 1);
+            const auto k_size = task_decomp.blockSize(task);
+            const auto k_end = k_start + k_size;
+            // Recv output from next rank
+            if (my_rank < num_of_nodes - 1) {
+                recvShadowPiece(output, output.size(0), k_start, k_size, my_rank + 1);
+            }
             Timer ctm;
             if (has_last) {
                 for (int k = k_start; k < k_end; k++) {
@@ -359,12 +425,17 @@ int main(int argc, char **argv) {
                 }
             }
             for (int k = k_start; k < k_end; k++) {
-                for (int i = i_end2; i >= i_start2; i--) {
+                for (int i = i_end2 - 1; i >= i_start2; i--) {
                     output(i, k) = al(i, k) * output(i + 1, k) + be(i, k);
                 }
             }
             comp_time += ctm.time();
+            // Send output to prev rank
+            if (my_rank > 0) {
+                send_ops.add(sendShadowPieceAsync(output, 0, k_start, k_size, my_rank - 1));
+            }
         }
+        send_ops.wait();
     };
 
     auto computeSweep = [&sweep_time, &computeSweepByCols, &computeSweepByRows](const DDArray2 &input, DDArray2 &output) {
@@ -379,7 +450,7 @@ int main(int argc, char **argv) {
 
     auto computeFFTInverseByRows = [im, km, n, &comp_time](const DDArray2 &input, DDArray2 &output) {
         CArray1 dan(2 * km);
-        const auto my_im_range = input.range();
+        const auto my_im_range = input.range(0);
         const auto i_start = my_im_range.localStart(1);
         const auto i_end = my_im_range.localEnd(2 * im + 1);
         Timer ctm;
@@ -417,11 +488,14 @@ int main(int argc, char **argv) {
 
     auto computeSolutionDifference = [im, km, &comp_time](const DDArray2 &first, const DDArray2 &second) -> DDArray2 {
         DDArray2 output(first.decomp2d(), first.rank());
-        const auto my_km_range = output.range();
+        const auto my_im_range = output.range(0);
+        const auto i_start = my_im_range.localStart(2);
+        const auto i_end = my_im_range.localEnd(im + 1);
+        const auto my_km_range = output.range(1);
         const auto k_start = my_km_range.localStart(1);
         const auto k_end = my_km_range.localEnd(km);
         Timer tm;
-        for (int i = 2; i < im + 1; i++) {
+        for (int i = i_start; i < i_end; i++) {
             for (int k = k_start; k < k_end; k++) {
                 output(i, k) = first(i, k) - second(i, k);
             }

@@ -111,6 +111,8 @@ public:
     void syncShadows();
     void combineFrom(const DistributedArray2D &src);
 
+    DArray2 gather(int root_rank = 0) const;
+
 private:
     void init(size_t sx, size_t sy, int shadow_x, int shadow_y, const BlockDecomposition2D &decomp, int rank);
 

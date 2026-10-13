@@ -41,3 +41,11 @@ void DistributedArray2D::combineFrom(const DistributedArray2D &src) {
         combineRowsFromCols(src.localArray(), localArray(), decomp(), src.decomp(), rank(), numOfNodes());
     }
 }
+
+DArray2 DistributedArray2D::gather(int root_rank) const {
+    if (isDistributedByRows()) {
+        return gatherArrayRows(localArray(), decomp(), _rank, _num_of_nodes, root_rank);
+    } else {
+        return gatherArrayCols(localArray(), decomp(), _rank, _num_of_nodes, root_rank);
+    }
+}
