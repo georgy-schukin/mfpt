@@ -144,8 +144,8 @@ DArray2 gatherArrayCols(const DArray2 &local_data, const BlockDecomposition &col
     if (rank == root) {
         data = DArray2(local_data.size(0), cols_decomp.fullSize());
         for (int r = 0; r < size; r++) {
-            auto recv_type = makeDataVectorType(data.size(0), cols_decomp.getBlockSize(r), data.fullSize(1));
-            MPI_Irecv(&data(0, cols_decomp.getBlockShift(r)), 1, recv_type, r, TAG_GATHER, MPI_COMM_WORLD, &reqs[r + 1]);
+            auto recv_type = makeDataVectorType(data.size(0), cols_decomp.blockSize(r), data.fullSize(1));
+            MPI_Irecv(&data(0, cols_decomp.blockShift(r)), 1, recv_type, r, TAG_GATHER, MPI_COMM_WORLD, &reqs[r + 1]);
             MPI_Type_free(&recv_type);
         }
     }
@@ -161,7 +161,7 @@ DArray2 scatterArrayCols(const DArray2 &data, int size_x, const BlockDecompositi
         reqs.resize(1);
     }
 
-    DArray2 local_data(size_x, cols_decomp.getBlockSize(rank), shadow_x, shadow_y);
+    DArray2 local_data(size_x, cols_decomp.blockSize(rank), shadow_x, shadow_y);
 
     auto recv_type = makeDataVectorType(local_data);
     MPI_Irecv(&local_data(0, 0), 1, recv_type, 0, TAG_SCATTER, MPI_COMM_WORLD, &reqs[0]);
@@ -169,8 +169,8 @@ DArray2 scatterArrayCols(const DArray2 &data, int size_x, const BlockDecompositi
 
     if (rank == root) {
         for (int r = 0; r < size; r++) {
-            auto send_type = makeDataVectorType(data.size(0), cols_decomp.getBlockSize(r), data.size(1) + 2 * data.shadowSize(1));
-            MPI_Isend(&data(0, cols_decomp.getBlockShift(r)), 1, send_type, r, TAG_SCATTER, MPI_COMM_WORLD, &reqs[r + 1]);
+            auto send_type = makeDataVectorType(data.size(0), cols_decomp.blockSize(r), data.size(1) + 2 * data.shadowSize(1));
+            MPI_Isend(&data(0, cols_decomp.blockShift(r)), 1, send_type, r, TAG_SCATTER, MPI_COMM_WORLD, &reqs[r + 1]);
             MPI_Type_free(&send_type);
         }
     }
@@ -186,11 +186,11 @@ void combineRowsFromCols(const DArray2 &src, DArray2 &dst, const BlockDecomposit
     std::vector<MPI_Datatype> recv_types(size);
 
     for (int i = 0; i < size; i++) {
-        send_counts[i] = rows_decomp.getBlockSize(i);
-        send_displs[i] = (src.at(rows_decomp.getBlockShift(i), 0) - src.at(0, 0)) * sizeof(double);
-        recv_counts[i] = rows_decomp.getBlockSize(rank);
-        recv_displs[i] = (dst.at(0, cols_decomp.getBlockShift(i)) - dst.at(0, 0)) * sizeof(double);
-        recv_types[i] = makeRowType(cols_decomp.getBlockSize(i), dst.fullSize(1));
+        send_counts[i] = rows_decomp.blockSize(i);
+        send_displs[i] = (src.at(rows_decomp.blockShift(i), 0) - src.at(0, 0)) * sizeof(double);
+        recv_counts[i] = rows_decomp.blockSize(rank);
+        recv_displs[i] = (dst.at(0, cols_decomp.blockShift(i)) - dst.at(0, 0)) * sizeof(double);
+        recv_types[i] = makeRowType(cols_decomp.blockSize(i), dst.fullSize(1));
         //std::cout << rank << " RC: send " << i << ": " << send_counts[i] << " " << send_displs[i] << ", recv " << recv_counts[i] << " " << recv_displs[i] << std::endl;
     }
 
@@ -210,11 +210,11 @@ void combineColsFromRows(const DArray2 &src, DArray2 &dst, const BlockDecomposit
     std::vector<MPI_Datatype> recv_types(size, recv_row_type);
 
     for (int i = 0; i < size; i++) {
-        send_counts[i] = rows_decomp.getBlockSize(rank);
-        send_displs[i] = (src.at(0, cols_decomp.getBlockShift(i)) - src.at(0, 0)) * sizeof(double);
-        send_types[i] = makeRowType(cols_decomp.getBlockSize(i), src.fullSize(1));
-        recv_counts[i] = rows_decomp.getBlockSize(i);
-        recv_displs[i] = (dst.at(rows_decomp.getBlockShift(i), 0) - dst.at(0, 0)) * sizeof(double);
+        send_counts[i] = rows_decomp.blockSize(rank);
+        send_displs[i] = (src.at(0, cols_decomp.blockShift(i)) - src.at(0, 0)) * sizeof(double);
+        send_types[i] = makeRowType(cols_decomp.blockSize(i), src.fullSize(1));
+        recv_counts[i] = rows_decomp.blockSize(i);
+        recv_displs[i] = (dst.at(rows_decomp.blockShift(i), 0) - dst.at(0, 0)) * sizeof(double);
         //std::cout << rank << " CR: send " << i << ": " << send_counts[i] << " " << send_displs[i] << ", recv " << recv_counts[i] << " " << recv_displs[i] << std::endl;
     }
 

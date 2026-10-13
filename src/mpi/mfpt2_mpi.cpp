@@ -4,6 +4,7 @@
 #include "distributed_array2d.h"
 #include "../common/output.h"
 #include "../common/timer.h"
+#include "async_op.h"
 
 #include <mpi.h>
 
@@ -77,6 +78,7 @@ int main(int argc, char **argv) {
     const int REPEATS_DEF = 1000;
     const int FOUT_DEF = 1;
     const int FULL_OUTPUT_DEF = 0;
+    const int DECOMP_BY_ROWS_DEF = 0;
 
     int rank, size;
 
@@ -93,6 +95,7 @@ int main(int argc, char **argv) {
                 " [repeats=" << REPEATS_DEF << "]" <<
                 " [file_output=" << FOUT_DEF << "]" <<
                 " [full_output=" << FULL_OUTPUT_DEF << "]" <<
+                " [decomp_by_rows=" << DECOMP_BY_ROWS_DEF << "]" <<
                 endl;
             MPI_Finalize();
             return 0;
@@ -105,20 +108,23 @@ int main(int argc, char **argv) {
     const int repeats = (argc > 3) ? stoi(argv[3]) : REPEATS_DEF;
     const bool file_output = (argc > 4) ? stoi(argv[4]) : FOUT_DEF;
     const bool full_output = (argc > 5) ? stoi(argv[5]) : FULL_OUTPUT_DEF;
+    const bool decomp_by_rows = (argc > 6) ? stoi(argv[6]) : DECOMP_BY_ROWS_DEF;
 
     //const size_t imp = im + 2;
-    const size_t imp2 = 2 * im + 2;
-    const size_t kmp = km + 2;
+    const size_t imp2 = 2 * im + 2;    
 
-    BlockDecomposition km_decomp = BlockDecomposition(km, size).grown(1); // km + 2
-    BlockDecomposition km4_decomp(4 * km, size); // 4 * km
-    BlockDecomposition im2_decomp = BlockDecomposition(2 * im, size).grown(1); // 2 * im + 2
+    const auto km_decomp = BlockDecomposition(km, size).grown(1); // km + 2
+    const auto km4_decomp = BlockDecomposition(4 * km, size); // 4 * km
+    const auto im2_decomp = BlockDecomposition(2 * im, size).grown(1); // 2 * im + 2
 
-    DDArray2 jf(imp2, km_decomp, rank);
-    DDArray2 aa1(imp2, km_decomp, rank, 1);
-    DDArray2 bb(imp2, km4_decomp, rank);
-    DDArray2 ff(imp2, km4_decomp, rank);
-    DDArray2 phi(imp2, km_decomp, rank);
+    const auto decomp_im2_km = decomp_by_rows ? BlockDecomposition2D(im2_decomp, km_decomp.fullSize()) : BlockDecomposition2D(im2_decomp.fullSize(), km_decomp);
+    const auto decomp_im2_km4 = decomp_by_rows ? BlockDecomposition2D(im2_decomp, km4_decomp.fullSize()) : BlockDecomposition2D(im2_decomp.fullSize(), km4_decomp);
+
+    DDArray2 jf(decomp_im2_km, rank);
+    DDArray2 aa1(decomp_im2_km, rank, 1);
+    DDArray2 bb(decomp_im2_km4, rank);
+    DDArray2 ff(decomp_im2_km4, rank);
+    DDArray2 phi(decomp_im2_km, rank);
 
     const double pi = 3.14159265358979;
     const double c = 0.5 * pi / km;
@@ -265,8 +271,8 @@ int main(int argc, char **argv) {
     };
 
     auto computeFFTByCols = [&im2_decomp, &redistrArray, &computeFFTByRows](const DDArray2 &input, DDArray2 &output) {
-        DDArray2 input_i(im2_decomp, input.decomp().fullSize(), input.rank());
-        DDArray2 output_i(im2_decomp, output.decomp().fullSize(), output.rank());
+        DDArray2 input_i(BlockDecomposition2D(im2_decomp, input.decomp(1).fullSize()), input.rank());
+        DDArray2 output_i(BlockDecomposition2D(im2_decomp, output.decomp(1).fullSize()), output.rank());
         redistrArray(input, input_i);
         computeFFTByRows(input_i, output_i);
         redistrArray(output_i, output);
@@ -282,8 +288,7 @@ int main(int argc, char **argv) {
         ft_time += tm.time();
     };
 
-    auto computeSweep = [im, km, imp2, hr, hr2, hz, hz2, c, &sweep_time, &comp_time](const DDArray2 &input, DDArray2 &output) {
-        Timer tm;
+    auto computeSweepByCols = [im, km, imp2, hr, hr2, hz, hz2, c, &comp_time](const DDArray2 &input, DDArray2 &output) {
         DArray1 al(imp2), be(imp2);
         const auto my_km4_range = input.range();
         const auto k_start = my_km4_range.localStart(0);
@@ -309,6 +314,66 @@ int main(int argc, char **argv) {
             }
         }
         comp_time += ctm.time();
+    };
+
+    auto computeSweepByRows = [im, km, imp2, hr, hr2, hz, hz2, c, &comp_time](const DDArray2 &input, DDArray2 &output) {
+        const int task_size = 4;
+        BlockDecomposition task_decomp(input.size(1), input.size(1) / task_size);
+        DArray2 al(input.size(0), input.size(1), 1), be(input.size(0), input.size(1), 1);
+        // Front sweep
+        const auto my_im_range = input.range();
+        const auto i_start1 = my_im_range.localStart(2);
+        const auto i_end1 = my_im_range.localEnd(2 * im + 1);
+        for (int task = 0; task < task_decomp.numOfBlocks(); task++) {
+            const auto k_start = task_decomp.blockShift(task);
+            const auto k_end = task_decomp.blockShift(task + 1);
+            Timer ctm;
+            for (int k = k_start; k < k_end; k++) {
+                const int k1 = (k >= 2 * km ? k - 2 * km : k);
+                const double dsin = sin(c * k1);
+                double s = 9.0 / (2.0 * hr2) + (4.0 / hz2) * dsin * dsin;
+                al(1, k) = 3.0 / (2.0 * hr2 * s);
+                be(1, k) = input(1, k) / s;
+                for (int i = i_start1; i < i_end1; i++) {
+                    s = (2.0 * ((i - 0.5) / hr) * ((i - 0.5) / hr)) / ((i) * (i - 1.0)) +
+                        (4.0 / hz2) * dsin * dsin -
+                        al[i - 1] * (i - 1.5) / ((i - 1.0) * hr2);
+                    al(i, k) = (i + 0.5) / (s * (i) * hr2);
+                    be(i, k) = (be(i - 1, k) * (i - 1.5) / ((i - 1.0) * hr2) + input(i, k)) / s;
+                }
+            }
+            comp_time += ctm.time();
+        }
+        // Back sweep
+        const auto i_start2 = my_im_range.localStart(1);
+        const auto i_end2 = my_im_range.localEnd(2 * im);
+        const auto has_last = input.range().hasIndex(2 * im + 1);
+        const auto last_ind = input.range().toLocal(2 * im + 1);
+        for (int task = 0; task < task_decomp.numOfBlocks(); task++) {
+            const auto k_start = task_decomp.blockShift(task);
+            const auto k_end = task_decomp.blockShift(task + 1);
+            Timer ctm;
+            if (has_last) {
+                for (int k = k_start; k < k_end; k++) {
+                    output(last_ind, k) = 0.0;
+                }
+            }
+            for (int k = k_start; k < k_end; k++) {
+                for (int i = i_end2; i >= i_start2; i--) {
+                    output(i, k) = al(i, k) * output(i + 1, k) + be(i, k);
+                }
+            }
+            comp_time += ctm.time();
+        }
+    };
+
+    auto computeSweep = [&sweep_time, &computeSweepByCols, &computeSweepByRows](const DDArray2 &input, DDArray2 &output) {
+        Timer tm;
+        if (input.isDistributedByRows()) {
+            computeSweepByRows(input, output);
+        } else {
+            computeSweepByCols(input, output);
+        }
         sweep_time += tm.time();
     };
 
@@ -333,8 +398,8 @@ int main(int argc, char **argv) {
     };
 
     auto computeFFTInverseByCols = [&redistrArray, &im2_decomp, &computeFFTInverseByRows](const DDArray2 &input, DDArray2 &output) {
-        DDArray2 input_i(im2_decomp, input.decomp().fullSize(), input.rank());
-        DDArray2 output_i(im2_decomp, output.decomp().fullSize(), output.rank());
+        DDArray2 input_i(BlockDecomposition2D(im2_decomp, input.decomp(1).fullSize()), input.rank());
+        DDArray2 output_i(BlockDecomposition2D(im2_decomp, output.decomp(1).fullSize()), output.rank());
         redistrArray(input, input_i);
         computeFFTInverseByRows(input_i, output_i);
         redistrArray(output_i, output);
@@ -351,7 +416,7 @@ int main(int argc, char **argv) {
     };
 
     auto computeSolutionDifference = [im, km, &comp_time](const DDArray2 &first, const DDArray2 &second) -> DDArray2 {
-        DDArray2 output(im + 2, first.decomp(), first.rank());
+        DDArray2 output(first.decomp2d(), first.rank());
         const auto my_km_range = output.range();
         const auto k_start = my_km_range.localStart(1);
         const auto k_end = my_km_range.localEnd(km);

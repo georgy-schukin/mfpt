@@ -61,11 +61,11 @@ std::vector<int> BlockDecomposition::computeShifts(const std::vector<int> &sizes
     return shifts;
 }
 
-int BlockDecomposition::getBlockSize(int block_index) const {
+int BlockDecomposition::blockSize(int block_index) const {
     return sizes[block_index];
 }
 
-int BlockDecomposition::getBlockShift(int block_index) const {
+int BlockDecomposition::blockShift(int block_index) const {
     return shifts[block_index];
 }
 
@@ -82,15 +82,15 @@ int BlockDecomposition::localStart(int index, int block_index) const {
 }
 
 int BlockDecomposition::localEnd(int index, int block_index) const {
-    return (block_index == numOfBlocks() - 1 ? index - getBlockShift(block_index): getBlockSize(block_index));
+    return (block_index == numOfBlocks() - 1 ? index - blockShift(block_index): blockSize(block_index));
 }
 
 int BlockDecomposition::toGlobal(int index, int block_index) const {
-    return index + getBlockShift(block_index);
+    return index + blockShift(block_index);
 }
 
-BlockDecomposition::Range BlockDecomposition::getRange(int block_index) const {
-    return BlockDecomposition::Range(getBlockShift(block_index), getBlockShift(block_index) + getBlockSize(block_index));
+BlockDecomposition::Range BlockDecomposition::range(int block_index) const {
+    return BlockDecomposition::Range(blockShift(block_index), blockShift(block_index) + blockSize(block_index));
 }
 
 BlockDecomposition BlockDecomposition::grown(int amount) const {

@@ -3,21 +3,11 @@
 #include "defs.h"
 #include "block_decomp.h"
 
+#include <mpi.h>
+
 class DistributedArray2D {
 public:
-    enum DistributionType {
-        BY_ROWS = 0,
-        BY_COLS
-    };
-
-public:
-    DistributedArray2D(const BlockDecomposition &dx, size_t sy, int rank, int shadow_size = 0) :
-        DistributedArray2D(dx.getBlockSize(rank), sy, shadow_size, 0, BY_ROWS, dx, rank) {
-    }
-
-    DistributedArray2D(size_t sx, const BlockDecomposition &dy, int rank, int shadow_size = 0) :
-        DistributedArray2D(sx, dy.getBlockSize(rank), 0, shadow_size, BY_COLS, dy, rank) {
-    }
+    DistributedArray2D(const BlockDecomposition2D &decomp, int rank, int shadow_size = 0);
 
     double* data() {
         return _data.data();
@@ -74,16 +64,24 @@ public:
         return _data.end();
     }
 
-    DistributionType distributionType() const {
-        return _distr_type;
-    }
-
-    const BlockDecomposition& decomp() const {
+    const BlockDecomposition2D& decomp2d() const {
         return _decomp;
     }
 
+    const BlockDecomposition& decomp(size_t dim) const {
+        return _decomp.decomp(dim);
+    }
+
+    const BlockDecomposition& decomp() const {
+        return isDistributedByRows() ? decomp(0) : decomp(1);
+    }
+
+    const BlockDecomposition::Range& range(size_t dim) const {
+        return _ranges[dim];
+    }
+
     const BlockDecomposition::Range& range() const {
-        return _range;
+        return isDistributedByRows() ? range(0) : range(1);
     }
 
     int rank() const {
@@ -103,21 +101,24 @@ public:
     }
 
     bool isDistributedByRows() const {
-        return distributionType() == BY_ROWS;
+        return _decomp.isByRows();
+    }
+
+    bool isDistributedByCols() const {
+        return _decomp.isByCols();
     }
 
     void syncShadows();
     void combineFrom(const DistributedArray2D &src);
 
 private:
-    DistributedArray2D(size_t sx, size_t sy, int shadow_x, int shadow_y, const DistributionType &dtype, const BlockDecomposition &decomp, int rank);
-    DistributedArray2D(DArray2 &&data, const DistributionType &dtype, const BlockDecomposition &decomp, int rank);
+    void init(size_t sx, size_t sy, int shadow_x, int shadow_y, const BlockDecomposition2D &decomp, int rank);
 
 private:
-    DArray2 _data;
-    const DistributionType _distr_type;
-    BlockDecomposition _decomp;
-    BlockDecomposition::Range _range;
+    DArray2 _data;    
+    BlockDecomposition2D _decomp;
+    std::array<BlockDecomposition::Range, 2> _ranges;
     int _rank;
     int _num_of_nodes;
+    MPI_Datatype _shadow_type;
 };

@@ -65,8 +65,8 @@ int main(int argc, char **argv) {
 
     // 1d decomposition by k.
     BlockDecomposition kms_decomp(kms, size);
-    const size_t km_bsize = kms_decomp.getBlockSize(rank);
-    const auto my_km_range = kms_decomp.getRange(rank);
+    const size_t km_bsize = kms_decomp.blockSize(rank);
+    const auto my_km_range = kms_decomp.range(rank);
 
     DArray2 br(ims, km_bsize), bf(ims, km_bsize), bz(ims, km_bsize);
     //DArray1 sb(ims2), jb(ims2), al(ims2), be(ims2);
@@ -205,7 +205,7 @@ int main(int argc, char **argv) {
         const auto dsins_size = dsins.size();
         for (int r = 0; r < size; r++) {
             Timer tm;
-            const auto curr_j_range = kms_decomp.getRange(r);
+            const auto curr_j_range = kms_decomp.range(r);
             const auto j_start = curr_j_range.localStart(1);
             const auto j_end = curr_j_range.localEnd(km);
             DArray2 tmp(output.size(0), curr_j_range.size(), 0.0, output.shadowSize(0), output.shadowSize(1));

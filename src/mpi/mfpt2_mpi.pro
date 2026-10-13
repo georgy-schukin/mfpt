@@ -14,6 +14,7 @@ exists(local.pri) {
 }
 
 SOURCES +=   \
+    async_op.cpp \
     block_decomp.cpp \
     comm_util.cpp \
     distributed_array2d.cpp \
@@ -22,6 +23,7 @@ SOURCES +=   \
 HEADERS +=   \
     ../common/output.h \
     ../common/timer.h \
+    async_op.h \
     block_decomp.h \
     comm_util.h \
     defs.h \

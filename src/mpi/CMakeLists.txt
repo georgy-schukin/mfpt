@@ -12,6 +12,7 @@ add_executable(mfpt_mpi
 )
 
 add_executable(mfpt2_mpi
+    async_op.cpp
     block_decomp.cpp
     distributed_array2d.cpp
     comm_util.cpp
