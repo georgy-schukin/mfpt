@@ -362,6 +362,7 @@ int main(int argc, char **argv) {
         const auto num_of_tasks = input.size(1) / task_size;
         BlockDecomposition task_decomp(input.size(1), num_of_tasks);
         //DArray2 al(input.size(0), input.size(1), 1), be(input.size(0), input.size(1), 1);
+
         // Front sweep
         const auto my_im_range = input.range();
         const auto i_start1 = my_im_range.localStart(2);
@@ -410,7 +411,7 @@ int main(int argc, char **argv) {
                 send_ops.add(sendShadowPieceAsync(be, be.size(0) - 1, k_start, k_size, my_rank + 1));
             }
         }
-        send_ops.wait();
+
         // Back sweep
         const auto i_start2 = my_im_range.localStart(1);
         const auto i_end2 = my_im_range.localEnd(2 * im + 1);
