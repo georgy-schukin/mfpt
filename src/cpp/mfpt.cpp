@@ -431,36 +431,34 @@ c         s=dcos(pi*z/zm)
 
     initTestSolution(input);
     initTestCurrent(input, jf);
-    doOutput("aa1 aa1", input);
-    doOutput("jf jf", jf);
 
     computeDifference(jf, gg);
     computeDifference(input, phi1);
-
-    doOutput("gg gg", gg);
 
     const auto dsins = computeSins(2 * km, c);
 
     computeFFT(gg, bb, dsins);
     computeFFT(phi1, ff1, dsins);
-    doOutput("bb bb", bb);
 
     computeSweep(bb, ff);
 
-    doOutput("ff ff", ff);
-    doOutput("ff1 ff1", ff1);
-
     computeFFTInverse(ff, phi, dsins);
-    doOutput("phi phi", phi);
-    doOutput("phi1 phi1", phi1);
-
-    doOutput("proverka2 dd dd", computeSolutionDifference(phi, gg));
 
     compSolution(phi, jf, aa);
-    doOutput("aa aa", aa);
-    doOutput("dd dd", computeSolutionDifference(aa, jf));
 
     computeMagnetics(aa, bz, br);
+
+    doOutput("aa1 aa1", input);
+    doOutput("jf jf", jf);
+    doOutput("gg gg", gg);
+    doOutput("bb bb", bb);
+    doOutput("ff ff", ff);
+    doOutput("ff1 ff1", ff1);
+    doOutput("phi phi", phi);
+    doOutput("phi1 phi1", phi1);
+    doOutput("proverka2 dd dd", computeSolutionDifference(phi, gg));
+    doOutput("aa aa", aa);
+    doOutput("dd dd", computeSolutionDifference(aa, jf));
 
     auto time = full_time.time();
 

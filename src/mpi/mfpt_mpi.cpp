@@ -63,7 +63,6 @@ int main(int argc, char **argv) {
 
     const size_t ims = im + 2;
     const size_t ims2 = 2 * im + 2;
-    const size_t kms = km + 2;
 
     // 1d decomposition by k.
     const auto kms_decomp = BlockDecomposition(km, size).grown(1); // km + 2
@@ -284,38 +283,48 @@ int main(int argc, char **argv) {
         return output;
     };
 
-    // TODO: parallelize
-    auto compSolution = [im, km, ims2, hr, hz, hr2, hz2, &comp_time, &sol_time](const DArray2 &phi, const DArray2 &jf, DArray2 &aa) {
+    auto computeSolutionFirstColumn = [im, km, ims2, hr, hz, hr2, hz2, &comp_time](const DDArray2 &phi, const DDArray2 &jf, DDArray2 &aa) {
         Timer tm;
         DArray1 al(ims2), be(ims2);
         al[0] = 1.0 / 3.0;
         be[0] = (2.0 * hr2 / 9.0) * (jf(1, 1) + phi(1,1) / hz2);
 
-        // i: 1..2*im: al(i) <- al(i - 1)
-        // i: 1..2*im: be(i) <- be(i - 1), phi(i + 1, 1), jf(i + 1, 1)
-        // i: seq
         for (int i = 1; i < 2 * im; i++) {
             double s = 2.0 * (i + 0.5) * (i + 0.5) / ((i + 1) * (i)) - al[i - 1] * (i - 0.5) / (i);
             al[i] = (i + 1.5) / ((i + 1) * s);
             be[i] = (be[i - 1] * (i - 0.5) / (i) + hr2 * (jf(i + 1, 1) + phi(i + 1, 1) / hz2)) / s;
         }
 
-        // i: 2*im-1..0: aa(i + 1, 1) <- al(i), be(i), aa(i + 2, 1)
-        // i: seq
         aa(2 * im + 1, 1) = 0.0;
         for (int i = 2 * im - 1; i >= 0; i--) {
             aa(i + 1, 1) = al[i] * aa(i + 2, 1) + be[i];
         }
+        comp_time += tm.time();
+    };
 
-        // i: 1..im+2, k: 1..km+1: aa(i, k + 1) <- aa(i, k), phi(i, k)
-        // i: par, k: seq
-        for (int i = 1; i < im + 2; i++) {
+    auto computeSolutionRows = [im, km, ims2, hr, hz, hr2, hz2, &comp_time](const DDArray2 &phi, DDArray2 &aa) {
+        const auto i_range = aa.range(0);
+        const auto i_start = i_range.localStart(1);
+        const auto i_end = i_range.localEnd(im + 2);
+        Timer tm;
+        for (int i = i_start; i < i_end; i++) {
             aa(i, 0) = aa(i, 1);
             for (int k = 1; k < km + 1; k++) {
                 aa(i, k + 1) = aa(i, k) + phi(i, k);
             }
         }
         comp_time += tm.time();
+    };
+
+    auto computeSolution = [&sol_time, &computeSolutionFirstColumn, &computeSolutionRows](const DDArray2 &phi, const DDArray2 &jf, DDArray2 &aa) {
+        Timer tm;
+        computeSolutionFirstColumn(phi, jf, aa);
+        const BlockDecomposition2D by_rows{BlockDecomposition(phi.decomp(0).fullSize(), phi.numOfNodes()), phi.decomp(1).fullSize()};
+        DDArray2 phi_rows(by_rows, phi.rank()), aa_rows(by_rows, aa.rank());
+        phi_rows.combineFrom(phi);
+        aa_rows.combineFrom(aa);
+        computeSolutionRows(phi_rows, aa_rows);
+        aa.combineFrom(aa_rows);
         sol_time += tm.time();
     };
 
@@ -352,48 +361,33 @@ int main(int argc, char **argv) {
     initTestSolution(aa1);
     initTestCurrent(aa1, jf);
 
-    gatherAndOutput("aa1 aa1", aa1);
-    gatherAndOutput("jf jf", jf);
-
     computeDifference(jf, gg);
     computeDifference(aa1, phi1);
-
-    gatherAndOutput("gg gg", gg);
 
     const auto dsins = computeSins(2 * km, c);
 
     computeFFT(gg, bb, dsins);
     computeFFT(phi1, ff1, dsins);
 
-    gatherAndOutput("bb bb", bb);
-
     computeSweep(bb, ff);
-
-    gatherAndOutput("ff ff", ff);
-    gatherAndOutput("ff1 ff1", ff1);
 
     computeFFTInverse(ff, phi, dsins);
 
-    gatherAndOutput("phi phi", phi);
-    gatherAndOutput("phi1 phi1", phi1);
-
-    gatherAndOutput("proverka2 dd dd", computeSolutionDifference(phi, gg));
-
-    // Temporary fix: compute solution on a root(0) node
-    auto phi_global = phi.gather(0);
-    auto jf_global = jf.gather(0);
-    DArray2 aa_global;
-    if (rank == 0) {
-        aa_global = DArray2(ims2, kms);
-        compSolution(phi_global, jf_global, aa_global);
-    }
-    aa.copy(scatterArrayCols(aa_global, ims2, kms_decomp, 0, 1, rank, size));
-
-    outputArray("aa aa", aa_global);
-
-    gatherAndOutput("dd dd", computeSolutionDifference(aa, jf));
+    computeSolution(phi, jf, aa);
 
     computeMagnetics(aa, bz, br);
+
+    gatherAndOutput("aa1 aa1", aa1);
+    gatherAndOutput("jf jf", jf);
+    gatherAndOutput("gg gg", gg);
+    gatherAndOutput("bb bb", bb);
+    gatherAndOutput("ff ff", ff);
+    gatherAndOutput("ff1 ff1", ff1);
+    gatherAndOutput("phi phi", phi);
+    gatherAndOutput("phi1 phi1", phi1);
+    gatherAndOutput("proverka2 dd dd", computeSolutionDifference(phi, gg));
+    gatherAndOutput("aa aa", aa);
+    gatherAndOutput("dd dd", computeSolutionDifference(aa, jf));
 
     auto work_time = work_timer.time();
 
