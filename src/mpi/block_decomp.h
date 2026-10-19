@@ -98,6 +98,14 @@ public:
         return decompositionType() == BY_COLS;
     }
 
+    static BlockDecomposition2D byRows(int sx, int sy, int size) {
+        return BlockDecomposition2D(BlockDecomposition(sx, size), sy);
+    }
+
+    static BlockDecomposition2D byCols(int sx, int sy, int size) {
+        return BlockDecomposition2D(sx, BlockDecomposition(sy, size));
+    }
+
 private:
     std::array<BlockDecomposition, 2> _decomps;
     DecompositionType _dec_type;

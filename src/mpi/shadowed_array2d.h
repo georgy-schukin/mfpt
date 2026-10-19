@@ -37,6 +37,13 @@ public:
         }
     }
 
+    template <typename Arr>
+    void copy(const Arr &src, int dx = 0, int dy = 0) {
+        for (int i = 0; i < src.size(0); i++)
+            for (int j = 0; j < src.size(1); j++)
+                _data[at(i + dx, j + dy)] = src(i, j);
+    }
+
     T* data() {
         return _data.data();
     }
@@ -117,17 +124,3 @@ private:
     typename std::vector<T> _data;
 };
 
-/*template <typename T>
-void copy(const ShadowedArray2D<T> &src, ShadowedArray2D<T> &dst,
-            size_t src_start_x = 0, size_t src_start_y = 0,
-            size_t dst_start_x = 0, size_t dst_start_y = 0) {
-    const auto start_x = std::min(src_start_x, src.size(0));
-    const auto start_y = std::min(src_start_y, src.size(1));
-    const auto end_x = std::min(dst.size(0), src.size(0) + start_x);
-    const auto end_y = std::min(dst.size(1), src.size(1) + start_y);
-    for (size_t i = src_start_x; i < end_x; i++) {
-        for (size_t j = src_start_y; j < end_y; j++) {
-            dst(i + dst_start_x, j + dst_start_y) = src(i, j);
-        }
-    }
-}*/

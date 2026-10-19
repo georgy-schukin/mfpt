@@ -109,15 +109,25 @@ public:
     }
 
     void syncShadows();
+
     void combineFrom(const DistributedArray2D &src);
 
     DArray2 gather(int root_rank = 0) const;
+
+    void copy(const DistributedArray2D &src, int dx = 0, int dy = 0) {
+        localArray().copy(src.localArray(), dx, dy);
+    }
+
+    template <typename Arr>
+    void copy(const Arr &src, int dx = 0, int dy = 0) {
+        localArray().copy(src, dx, dy);
+    }
 
 private:
     void init(size_t sx, size_t sy, int shadow_x, int shadow_y, const BlockDecomposition2D &decomp, int rank);
 
 private:
-    DArray2 _data;    
+    DArray2 _data;
     BlockDecomposition2D _decomp;
     std::array<BlockDecomposition::Range, 2> _ranges;
     int _rank;

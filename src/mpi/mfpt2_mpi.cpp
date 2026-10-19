@@ -114,14 +114,18 @@ int main(int argc, char **argv) {
     const int task_size = (argc > 7) ? stoi(argv[7]) : TASK_SIZE_DEF;
 
     //const size_t imp = im + 2;
-    const size_t imp2 = 2 * im + 2;    
+    const size_t imp2 = 2 * im + 2;
 
     const auto km_decomp = BlockDecomposition(km, size).grown(1); // km + 2
     const auto km4_decomp = BlockDecomposition(4 * km, size); // 4 * km
     const auto im2_decomp = BlockDecomposition(2 * im, size).grown(1); // 2 * im + 2
 
-    const auto decomp_im2_km = decomp_by_rows ? BlockDecomposition2D(im2_decomp, km_decomp.fullSize()) : BlockDecomposition2D(im2_decomp.fullSize(), km_decomp);
-    const auto decomp_im2_km4 = decomp_by_rows ? BlockDecomposition2D(im2_decomp, km4_decomp.fullSize()) : BlockDecomposition2D(im2_decomp.fullSize(), km4_decomp);
+    const auto decomp_im2_km = decomp_by_rows ?
+                                BlockDecomposition2D(im2_decomp, km_decomp.fullSize()) :
+                                BlockDecomposition2D(im2_decomp.fullSize(), km_decomp);
+    const auto decomp_im2_km4 = decomp_by_rows ?
+                                BlockDecomposition2D(im2_decomp, km4_decomp.fullSize()) :
+                                BlockDecomposition2D(im2_decomp.fullSize(), km4_decomp);
 
     DDArray2 jf(decomp_im2_km, rank);
     DDArray2 aa1(decomp_im2_km, rank, 1);

@@ -36,7 +36,7 @@ MPI_Datatype makeDataVectorType(int num_of_blocks, int block_size, int stride, i
     if (extent > 0) {
         MPI_Type_create_resized(type, 0, extent * sizeof(double), &vtype);
     } else {
-        MPI_Type_dup(type, &vtype);
+        vtype = type;
     }
     MPI_Type_commit(&vtype);
     return vtype;
