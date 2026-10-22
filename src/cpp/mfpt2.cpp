@@ -111,7 +111,7 @@ int main(int argc, char **argv) {
 */
 
     const int IM_DEF = 80;
-    const int N_DEF = 7;
+    const int KM_DEF = std::pow(2, 7);
     const int REPEATS_DEF = 1000;
     const int FOUT_DEF = 1;
     const int FULL_OUTPUT_DEF = 0;
@@ -121,7 +121,7 @@ int main(int argc, char **argv) {
         if (s == "-h" || s == "--help") {
             cout << argv[0] <<
                 " [im=" << IM_DEF << "]" <<
-                " [n=" << N_DEF << "]" <<
+                " [km=" << KM_DEF << " (must be 2^n)]" <<
                 " [repeats=" << REPEATS_DEF << "]" <<
                 " [file_output=" << FOUT_DEF << "]" <<
                 " [full_output=" << FULL_OUTPUT_DEF << "]" <<
@@ -131,12 +131,15 @@ int main(int argc, char **argv) {
     }
 
     const int im = (argc > 1) ? stoi(argv[1]) : IM_DEF;
-    const int n = (argc > 2) ? stoi(argv[2]) : N_DEF;
-    const int km = std::pow(2, n);
+    const int km = (argc > 2) ? stoi(argv[2]) : KM_DEF;
+    const int n = std::log2(km);
     const int repeats = (argc > 3) ? stoi(argv[3]) : REPEATS_DEF;
     const bool file_output = (argc > 4) ? stoi(argv[4]) : FOUT_DEF;
     const bool full_output = (argc > 5) ? stoi(argv[5]) : FULL_OUTPUT_DEF;
 
+    if (std::abs(std::log2(km) - n) > 1e-10) {
+        std::cerr << "Warning: km must be 2^n" << std::endl;
+    }
 
 /*
     integer imp,kmp,im,km,i,k,n,k1,km2,j,k2,i1,m,nj,j1
@@ -466,7 +469,7 @@ int main(int argc, char **argv) {
 
         computeFFT(jf, bb);
         computeSweep(bb, ff);
-        computeFFTInverse(ff, phi);        
+        computeFFTInverse(ff, phi);
     }
 
     doOutputRange("phi phi", phi, {0, 7, 0, km + 2});

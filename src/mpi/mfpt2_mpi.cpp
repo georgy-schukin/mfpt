@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
 */
 
     const int IM_DEF = 80;
-    const int N_DEF = 7;
+    const int KM_DEF = std::pow(2, 7);
     const int REPEATS_DEF = 1000;
     const int FOUT_DEF = 1;
     const int FULL_OUTPUT_DEF = 0;
@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
         if (s == "-h" || s == "--help") {
             cout << argv[0] <<
                 " [im=" << IM_DEF << "]" <<
-                " [n=" << N_DEF << "]" <<
+                " [km=" << KM_DEF << " (must be 2^n)]" <<
                 " [repeats=" << REPEATS_DEF << "]" <<
                 " [file_output=" << FOUT_DEF << "]" <<
                 " [full_output=" << FULL_OUTPUT_DEF << "]" <<
@@ -105,13 +105,17 @@ int main(int argc, char **argv) {
     }
 
     const int im = (argc > 1) ? stoi(argv[1]) : IM_DEF;
-    const int n = (argc > 2) ? stoi(argv[2]) : N_DEF;
-    const int km = std::pow(2, n);
+    const int km = (argc > 2) ? stoi(argv[2]) : KM_DEF;
+    const int n = std::log2(km);
     const int repeats = (argc > 3) ? stoi(argv[3]) : REPEATS_DEF;
     const bool file_output = (argc > 4) ? stoi(argv[4]) : FOUT_DEF;
     const bool full_output = (argc > 5) ? stoi(argv[5]) : FULL_OUTPUT_DEF;
     const bool decomp_by_rows = (argc > 6) ? stoi(argv[6]) : DECOMP_BY_ROWS_DEF;
     const int task_size = (argc > 7) ? stoi(argv[7]) : TASK_SIZE_DEF;
+
+    if (rank == 0 && std::abs(std::log2(km) - n) > 1e-10) {
+        std::cerr << "Warning: km must be 2^n" << std::endl;
+    }
 
     //const size_t imp = im + 2;
     const size_t imp2 = 2 * im + 2;
